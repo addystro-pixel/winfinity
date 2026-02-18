@@ -18,8 +18,9 @@ function AdminLogin() {
     setError('')
     setLoading(true)
     try {
-      const { token } = await adminLogin(email, password)
+      const { token, admin } = await adminLogin(email, password)
       sessionStorage.setItem(ADMIN_TOKEN_KEY, token)
+      if (admin) sessionStorage.setItem('winfinity_admin_data', JSON.stringify({ role: admin.role, permissions: admin.permissions }))
       navigate('/admin/dashboard')
     } catch (err) {
       setError(err.message === 'CONNECTION_ERROR'

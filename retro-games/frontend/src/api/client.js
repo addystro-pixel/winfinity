@@ -43,6 +43,14 @@ export async function getSignups(token) {
   return res.json()
 }
 
+export async function getAdminMe(token) {
+  const res = await fetch(`${API_BASE}/api/admin/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error('Failed to fetch admin')
+  return res.json()
+}
+
 export async function getAdminStats(token) {
   const res = await fetch(`${API_BASE}/api/admin/stats`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -453,6 +461,20 @@ export async function getAdminFriends(token) {
   })
   if (!res.ok) throw new Error('Failed to fetch friends')
   return res.json()
+}
+
+export async function createAdmin(email, name, password, permissions, token) {
+  const res = await fetch(`${API_BASE}/api/admin/admins`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ email, name, password, permissions }),
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(json.error || 'Failed to create admin')
+  return json
 }
 
 export async function addAdminFriend(friendAdminId, token) {

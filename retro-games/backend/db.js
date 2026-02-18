@@ -166,14 +166,22 @@ if (!dmCols.includes('status')) {
   db.exec("UPDATE direct_messages SET status = COALESCE(status, 'delivered')")
 }
 
+const adminInfo = db.prepare("PRAGMA table_info(admins)").all()
+const adminCols = adminInfo.map(c => c.name)
+if (!adminCols.includes('role')) db.exec("ALTER TABLE admins ADD COLUMN role TEXT DEFAULT 'super'")
+if (!adminCols.includes('permissions')) db.exec("ALTER TABLE admins ADD COLUMN permissions TEXT")
+if (!adminCols.includes('created_by')) db.exec('ALTER TABLE admins ADD COLUMN created_by INTEGER')
+db.prepare("UPDATE admins SET role = 'super' WHERE role IS NULL OR role = ''").run()
+db.prepare("UPDATE admins SET permissions = '{\"users\":true,\"chat\":true,\"feed\":true,\"games\":true,\"admins\":true,\"settings\":true}' WHERE role = 'super' AND (permissions IS NULL OR permissions = '')").run()
+
 const adminCount = db.prepare('SELECT COUNT(*) as c FROM admins').get()
 if (adminCount.c === 0) {
   const now = new Date().toISOString()
-  db.prepare('INSERT INTO admins (email, name, password_hash, date) VALUES (?, ?, ?, ?)').run('addystro@gmail.com', 'Admin', hashPassword('CACTUS4590'), now)
+  db.prepare("INSERT INTO admins (email, name, password_hash, date, role, permissions) VALUES (?, ?, ?, ?, 'super', '{\"users\":true,\"chat\":true,\"feed\":true,\"games\":true,\"admins\":true,\"settings\":true}')").run('addystro@gmail.com', 'Admin', hashPassword('CACTUS4590'), now)
 }
 const admin2Exists = db.prepare('SELECT 1 FROM admins WHERE email = ?').get('admin2@winfinity.com')
 if (!admin2Exists) {
-  db.prepare('INSERT INTO admins (email, name, password_hash, date) VALUES (?, ?, ?, ?)').run('admin2@winfinity.com', 'Admin 2', hashPassword('admin123'), new Date().toISOString())
+  db.prepare("INSERT INTO admins (email, name, password_hash, date, role, permissions) VALUES (?, ?, ?, ?, 'admin', '{\"users\":true,\"chat\":true,\"feed\":false,\"games\":false,\"admins\":false,\"settings\":false}')").run('admin2@winfinity.com', 'Admin 2', hashPassword('admin123'), new Date().toISOString())
 }
 
 export function getAllSignups() {
@@ -354,7 +362,20 @@ export function getAdminById(id) {
 }
 
 export function getAllAdmins() {
-  return db.prepare('SELECT id, email, name, date FROM admins ORDER BY name').all()
+  const rows = db.prepare('SELECT id, email, name, date, role, permissions, created_by FROM admins ORDER BY name').all()
+  return rows.map(r => ({
+    ...r,
+    permissions: r.permissions ? JSON.parse(r.permissions) : null,
+  }))
+}
+
+export function createAdmin({ email, name, passwordHash, role = 'admin', permissions, createdBy }) {
+  const perms = typeof permissions === 'string' ? permissions : JSON.stringify(permissions || {})
+  const result = db.prepare(`
+    INSERT INTO admins (email, name, password_hash, date, role, permissions, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(email, name, passwordHash, new Date().toISOString(), role, perms, createdBy || null)
+  return result.lastInsertRowid
 }
 
 export function getAdminFriends(adminId) {

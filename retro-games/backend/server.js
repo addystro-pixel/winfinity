@@ -53,6 +53,7 @@ import {
   deleteGame,
   updateUserActive,
   isUserActive,
+  createAdmin,
 } from './db.js'
 import { getPhoneLengthForCountry } from './phoneValidation.js'
 
@@ -176,10 +177,26 @@ function verifyAdminToken(req, res, next) {
     const decoded = jwt.verify(token, JWT_SECRET)
     if (decoded.adminId) {
       req.adminId = decoded.adminId
+      const admin = getAdminById(decoded.adminId)
+      if (admin) {
+        req.admin = {
+          ...admin,
+          permissions: admin.permissions ? JSON.parse(admin.permissions) : { users: true, chat: true, feed: true, games: true, admins: true, settings: true },
+        }
+      }
       return next()
     }
   } catch {}
   res.status(401).json({ error: 'Unauthorized' })
+}
+
+function requireAdminPermission(perm) {
+  return (req, res, next) => {
+    if (!req.admin) return res.status(403).json({ error: 'Forbidden' })
+    if (req.admin.role === 'super') return next()
+    if (req.admin.permissions && req.admin.permissions[perm]) return next()
+    res.status(403).json({ error: 'You do not have permission for this action' })
+  }
 }
 
 async function sendVerificationEmail(to, token, userName) {
@@ -359,10 +376,21 @@ app.post('/api/admin/login', (req, res) => {
     return res.status(401).json({ error: 'Invalid email or password' })
   }
   const token = jwt.sign({ adminId: admin.id }, JWT_SECRET, { expiresIn: '7d' })
-  res.json({ success: true, token, admin: { id: admin.id, email: admin.email, name: admin.name } })
+  const perms = admin.permissions ? JSON.parse(admin.permissions) : null
+  res.json({
+    success: true,
+    token,
+    admin: {
+      id: admin.id,
+      email: admin.email,
+      name: admin.name,
+      role: admin.role || 'admin',
+      permissions: perms,
+    },
+  })
 })
 
-app.get('/api/signups', verifyAdminToken, (req, res) => {
+app.get('/api/signups', verifyAdminToken, requireAdminPermission('users'), (req, res) => {
   const signups = getAllSignups()
   res.json(signups.map(s => ({
     id: s.id,
@@ -375,7 +403,7 @@ app.get('/api/signups', verifyAdminToken, (req, res) => {
   })))
 })
 
-app.delete('/api/signups/:id', verifyAdminToken, (req, res) => {
+app.delete('/api/signups/:id', verifyAdminToken, requireAdminPermission('users'), (req, res) => {
   const id = parseInt(req.params.id, 10)
   if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid ID' })
   const result = deleteSignup(id)
@@ -383,7 +411,7 @@ app.delete('/api/signups/:id', verifyAdminToken, (req, res) => {
   res.json({ success: true, message: 'User deleted' })
 })
 
-app.put('/api/admin/signups/:id/verify', verifyAdminToken, (req, res) => {
+app.put('/api/admin/signups/:id/verify', verifyAdminToken, requireAdminPermission('users'), (req, res) => {
   const id = parseInt(req.params.id, 10)
   if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid ID' })
   const signup = getSignupById(id)
@@ -393,7 +421,7 @@ app.put('/api/admin/signups/:id/verify', verifyAdminToken, (req, res) => {
   res.json({ success: true, message: 'User verified' })
 })
 
-app.get('/api/admin/stats', verifyAdminToken, (req, res) => {
+app.get('/api/admin/stats', verifyAdminToken, requireAdminPermission('users'), (req, res) => {
   try {
     const stats = getAdminStats()
     res.json(stats)
@@ -412,12 +440,12 @@ function mapFeedPostsWithUrls(posts) {
   }))
 }
 
-app.get('/api/admin/feed', verifyAdminToken, (req, res) => {
+app.get('/api/admin/feed', verifyAdminToken, requireAdminPermission('feed'), (req, res) => {
   const posts = getFeedPosts()
   res.json(mapFeedPostsWithUrls(posts))
 })
 
-app.post('/api/admin/feed', verifyAdminToken, (req, res) => {
+app.post('/api/admin/feed', verifyAdminToken, requireAdminPermission('feed'), (req, res) => {
   return feedUpload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }])(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message || 'Upload failed' })
     const { title, content } = req.body || {}
@@ -431,7 +459,7 @@ app.post('/api/admin/feed', verifyAdminToken, (req, res) => {
   })
 })
 
-app.put('/api/admin/feed/:id', verifyAdminToken, (req, res) => {
+app.put('/api/admin/feed/:id', verifyAdminToken, requireAdminPermission('feed'), (req, res) => {
   return feedUpload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }])(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message || 'Upload failed' })
     const id = parseInt(req.params.id, 10)
@@ -452,7 +480,7 @@ app.put('/api/admin/feed/:id', verifyAdminToken, (req, res) => {
   })
 })
 
-app.delete('/api/admin/feed/:id', verifyAdminToken, (req, res) => {
+app.delete('/api/admin/feed/:id', verifyAdminToken, requireAdminPermission('feed'), (req, res) => {
   const id = parseInt(req.params.id, 10)
   if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid ID' })
   const result = deleteFeedPost(id)
@@ -476,12 +504,12 @@ app.get('/api/games', (req, res) => {
   res.json(mapGamesWithUrls(games))
 })
 
-app.get('/api/admin/games', verifyAdminToken, (req, res) => {
+app.get('/api/admin/games', verifyAdminToken, requireAdminPermission('games'), (req, res) => {
   const games = getGames()
   res.json(mapGamesWithUrls(games))
 })
 
-app.post('/api/admin/games', verifyAdminToken, (req, res, next) => {
+app.post('/api/admin/games', verifyAdminToken, requireAdminPermission('games'), (req, res, next) => {
   const contentType = req.headers['content-type'] || ''
   if (contentType.includes('multipart/form-data')) {
     return gameLogoUpload.single('logo')(req, res, (err) => {
@@ -499,7 +527,7 @@ app.post('/api/admin/games', verifyAdminToken, (req, res, next) => {
   res.json({ success: true, id })
 })
 
-app.put('/api/admin/games/:id', verifyAdminToken, (req, res, next) => {
+app.put('/api/admin/games/:id', verifyAdminToken, requireAdminPermission('games'), (req, res, next) => {
   const contentType = req.headers['content-type'] || ''
   const handler = (err) => {
     if (err) return res.status(400).json({ error: err.message || 'Upload failed' })
@@ -527,7 +555,7 @@ app.put('/api/admin/games/:id', verifyAdminToken, (req, res, next) => {
   res.json({ success: true })
 })
 
-app.delete('/api/admin/games/:id', verifyAdminToken, (req, res) => {
+app.delete('/api/admin/games/:id', verifyAdminToken, requireAdminPermission('games'), (req, res) => {
   const id = parseInt(req.params.id, 10)
   if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid ID' })
   const result = deleteGame(id)
@@ -535,7 +563,7 @@ app.delete('/api/admin/games/:id', verifyAdminToken, (req, res) => {
   res.json({ success: true })
 })
 
-app.get('/api/admin/messages', verifyAdminToken, (req, res) => {
+app.get('/api/admin/messages', verifyAdminToken, requireAdminPermission('chat'), (req, res) => {
   const messages = getAllMessages()
   const baseUrl = process.env.API_BASE || `http://localhost:${PORT}`
   res.json(messages.map(m => ({
@@ -552,7 +580,7 @@ app.get('/api/admin/messages', verifyAdminToken, (req, res) => {
   })))
 })
 
-app.get('/api/admin/conversation/:userId', verifyAdminToken, (req, res) => {
+app.get('/api/admin/conversation/:userId', verifyAdminToken, requireAdminPermission('chat'), (req, res) => {
   const userId = parseInt(req.params.userId, 10)
   if (!userId || isNaN(userId)) return res.status(400).json({ error: 'Invalid user ID' })
   const messages = getMessagesForUser(userId)
@@ -677,7 +705,20 @@ app.post('/api/direct-messages/:friendId', verifyUserToken, (req, res, next) => 
   res.json({ success: true })
 })
 
-app.get('/api/admin/admins', verifyAdminToken, (req, res) => {
+app.get('/api/admin/me', verifyAdminToken, (req, res) => {
+  const admin = getAdminById(req.adminId)
+  if (!admin) return res.status(404).json({ error: 'Admin not found' })
+  const perms = admin.permissions ? JSON.parse(admin.permissions) : null
+  res.json({
+    id: admin.id,
+    email: admin.email,
+    name: admin.name,
+    role: admin.role || 'admin',
+    permissions: perms,
+  })
+})
+
+app.get('/api/admin/admins', verifyAdminToken, requireAdminPermission('admins'), (req, res) => {
   const admins = getAllAdmins()
   const friends = getAdminFriends(req.adminId)
   const friendIds = new Set(friends.map(f => f.id))
@@ -685,17 +726,47 @@ app.get('/api/admin/admins', verifyAdminToken, (req, res) => {
     id: a.id,
     email: a.email,
     name: a.name,
+    role: a.role || 'admin',
+    permissions: a.permissions,
     isFriend: friendIds.has(a.id),
     isSelf: a.id === req.adminId,
   })))
 })
 
-app.get('/api/admin/friends', verifyAdminToken, (req, res) => {
+app.post('/api/admin/admins', verifyAdminToken, requireAdminPermission('admins'), (req, res) => {
+  if (req.admin.role !== 'super') return res.status(403).json({ error: 'Only superior admin can create admins' })
+  const { email, name, password, permissions } = req.body || {}
+  if (!email?.trim() || !name?.trim() || !password) {
+    return res.status(400).json({ error: 'Email, name, and password are required' })
+  }
+  if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' })
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email' })
+  if (getAdminByEmail(email.trim())) return res.status(400).json({ error: 'Email already registered' })
+  const perms = typeof permissions === 'object' ? permissions : {
+    users: true,
+    chat: true,
+    feed: false,
+    games: false,
+    admins: false,
+    settings: false,
+  }
+  const id = createAdmin({
+    email: email.trim().toLowerCase(),
+    name: name.trim(),
+    passwordHash: hashPassword(password),
+    role: 'admin',
+    permissions: perms,
+    createdBy: req.adminId,
+  })
+  res.json({ success: true, id, message: 'Admin created' })
+})
+
+app.get('/api/admin/friends', verifyAdminToken, requireAdminPermission('admins'), (req, res) => {
   const friends = getAdminFriends(req.adminId)
   res.json(friends)
 })
 
-app.post('/api/admin/friends', verifyAdminToken, (req, res) => {
+app.post('/api/admin/friends', verifyAdminToken, requireAdminPermission('admins'), (req, res) => {
   const friendAdminId = parseInt(req.body?.friendAdminId, 10)
   if (!friendAdminId || isNaN(friendAdminId)) return res.status(400).json({ error: 'Invalid admin ID' })
   if (friendAdminId === req.adminId) return res.status(400).json({ error: 'Cannot add yourself' })
@@ -706,7 +777,7 @@ app.post('/api/admin/friends', verifyAdminToken, (req, res) => {
   res.json({ success: true, message: 'Friend added' })
 })
 
-app.post('/api/admin/reply', verifyAdminToken, (req, res, next) => {
+app.post('/api/admin/reply', verifyAdminToken, requireAdminPermission('chat'), (req, res, next) => {
   const contentType = req.headers['content-type'] || ''
   if (contentType.includes('multipart/form-data')) {
     return upload.fields([{ name: 'image', maxCount: 1 }, { name: 'voice', maxCount: 1 }])(req, res, (err) => {
@@ -806,7 +877,11 @@ app.post('/api/messages', verifyUserToken, (req, res, next) => {
 })
 
 app.get('/api/messages', verifyUserToken, (req, res) => {
-  const messages = getMessagesByUser(req.userId)
+  let messages = getMessagesByUser(req.userId)
+  if (messages.length === 0) {
+    addMessage(req.userId, 'Hello! Welcome to Winfinity. Which game would you like to play?', 'text', null, 'support')
+    messages = getMessagesByUser(req.userId)
+  }
   const baseUrl = process.env.API_BASE || `http://localhost:${PORT}`
   res.json(messages.map(m => ({
     id: m.id,

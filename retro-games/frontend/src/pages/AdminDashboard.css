@@ -78,6 +78,98 @@
   margin: 0 0 1rem;
 }
 
+.admin-admins-section {
+  max-width: 720px;
+}
+
+.admin-create-form {
+  max-width: 480px;
+  padding: 1.25rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 16px;
+  margin-bottom: 1.5rem;
+}
+
+.admin-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.admin-form-row input {
+  padding: 0.75rem 1rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+}
+
+.admin-perms-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.admin-perms-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.admin-perm-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.admin-perm-check input {
+  width: 18px;
+  height: 18px;
+}
+
+.admin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.admin-list-item {
+  padding: 1rem 1.25rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.admin-role-badge {
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(251, 191, 36, 0.2);
+  color: var(--accent-gold);
+}
+
+.admin-role-badge.super {
+  background: rgba(244, 114, 182, 0.2);
+  color: var(--accent-secondary);
+}
+
+.admin-perms-hint {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
 .section-header {
   display: flex;
   justify-content: space-between;
@@ -691,7 +783,9 @@
 
 .profiles-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .profiles-empty {

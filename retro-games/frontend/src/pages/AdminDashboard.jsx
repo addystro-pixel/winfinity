@@ -8,6 +8,9 @@ import {
   getSignups,
   deleteSignup,
   verifySignup,
+  getAdminAdmins,
+  createAdmin,
+  getAdminMe,
   getAdminConversation,
   sendAdminReply,
   getAdminStats,
@@ -700,10 +703,129 @@ function AdminGamesManager({ token }) {
   )
 }
 
+const PERM_LABELS = { users: 'Users', chat: 'Chat', feed: 'Feed Manager', games: 'Games', admins: 'Manage Admins', settings: 'Settings' }
+
+function AdminAdmins({ token, isSuper }) {
+  const [admins, setAdmins] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [showForm, setShowForm] = useState(false)
+  const [formEmail, setFormEmail] = useState('')
+  const [formName, setFormName] = useState('')
+  const [formPassword, setFormPassword] = useState('')
+  const [formPerms, setFormPerms] = useState({ users: true, chat: true, feed: false, games: false, admins: false, settings: false })
+  const [creating, setCreating] = useState(false)
+
+  const loadAdmins = useCallback(async () => {
+    if (!token) return
+    setLoading(true)
+    setError('')
+    try {
+      const data = await getAdminAdmins(token)
+      setAdmins(data)
+    } catch (err) {
+      setError(err.message || 'Failed to load')
+      setAdmins([])
+    } finally {
+      setLoading(false)
+    }
+  }, [token])
+
+  useEffect(() => { loadAdmins() }, [loadAdmins])
+
+  const togglePerm = (key) => {
+    if (key === 'admins') return
+    setFormPerms((p) => ({ ...p, [key]: !p[key] }))
+  }
+
+  const handleCreate = async (e) => {
+    e.preventDefault()
+    if (!isSuper || !token || !formEmail.trim() || !formName.trim() || !formPassword) return
+    if (formPassword.length < 6) {
+      setError('Password must be at least 6 characters')
+      return
+    }
+    setCreating(true)
+    setError('')
+    try {
+      await createAdmin(formEmail.trim(), formName.trim(), formPassword, formPerms, token)
+      setFormEmail('')
+      setFormName('')
+      setFormPassword('')
+      setFormPerms({ users: true, chat: true, feed: false, games: false, admins: false, settings: false })
+      setShowForm(false)
+      await loadAdmins()
+    } catch (err) {
+      setError(err.message || 'Failed to create')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <section className="admin-admins-section">
+      <div className="section-header">
+        <h2>Admins</h2>
+        {isSuper && (
+          <button type="button" className="add-post-btn" onClick={() => setShowForm(!showForm)}>
+            {showForm ? 'Cancel' : '+ Add Admin'}
+          </button>
+        )}
+      </div>
+      {error && <p className="admin-error">{error}</p>}
+      {isSuper && showForm && (
+        <form onSubmit={handleCreate} className="admin-create-form">
+          <div className="admin-form-row">
+            <input type="email" placeholder="Email" value={formEmail} onChange={(e) => setFormEmail(e.target.value)} required />
+            <input type="text" placeholder="Name" value={formName} onChange={(e) => setFormName(e.target.value)} required />
+            <input type="password" placeholder="Password (min 6)" value={formPassword} onChange={(e) => setFormPassword(e.target.value)} required minLength={6} />
+          </div>
+          <div className="admin-perms-row">
+            <span className="admin-perms-label">Permissions:</span>
+            {['users', 'chat', 'feed', 'games', 'settings'].map((key) => (
+              <label key={key} className="admin-perm-check">
+                <input type="checkbox" checked={!!formPerms[key]} onChange={() => togglePerm(key)} />
+                {PERM_LABELS[key]}
+              </label>
+            ))}
+          </div>
+          <button type="submit" className="add-post-btn" disabled={creating}>{creating ? 'Creating...' : 'Create Admin'}</button>
+        </form>
+      )}
+      {loading ? (
+        <p className="admin-loading">Loading...</p>
+      ) : (
+        <div className="admin-list">
+          {admins.map((a) => (
+            <div key={a.id} className="admin-list-item">
+              <div>
+                <strong>{a.name}</strong> ({a.email})
+                <span className={`admin-role-badge ${a.role === 'super' ? 'super' : ''}`}>{a.role === 'super' ? 'Super Admin' : 'Admin'}</span>
+              </div>
+              {a.permissions && (
+                <span className="admin-perms-hint">
+                  {Object.entries(a.permissions).filter(([, v]) => v).map(([k]) => PERM_LABELS[k] || k).join(', ')}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function AdminDashboard() {
   const [activeSection, setActiveSection] = useState('overview')
   const [signups, setSignups] = useState([])
   const [loading, setLoading] = useState(true)
+  const [adminData, setAdminData] = useState(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem('winfinity_admin_data') || '{}')
+    } catch {
+      return {}
+    }
+  })
   const navigate = useNavigate()
   const token = sessionStorage.getItem(ADMIN_TOKEN_KEY)
 
@@ -715,10 +837,42 @@ function AdminDashboard() {
     getSignups(token).then(setSignups).catch(() => setSignups([])).finally(() => setLoading(false))
   }, [token, navigate])
 
+  useEffect(() => {
+    if (!token) return
+    const stored = sessionStorage.getItem('winfinity_admin_data')
+    if (stored) return
+    getAdminMe(token)?.then(({ role, permissions }) => {
+      const data = { role, permissions }
+      sessionStorage.setItem('winfinity_admin_data', JSON.stringify(data))
+      setAdminData(data)
+    }).catch(() => {})
+  }, [token])
+
   const handleLogout = () => {
     sessionStorage.removeItem(ADMIN_TOKEN_KEY)
+    sessionStorage.removeItem('winfinity_admin_data')
     navigate('/')
   }
+  const isSuper = adminData.role === 'super'
+  const perms = adminData.permissions || {}
+
+  const can = (key) => isSuper || !!perms[key]
+
+  const sections = [
+    can('users') && 'overview',
+    can('users') && 'users',
+    can('chat') && 'chat',
+    can('feed') && 'feed',
+    can('games') && 'games',
+    can('admins') && 'admins',
+  ].filter(Boolean)
+  const firstSection = sections[0] || 'overview'
+
+  useEffect(() => {
+    if (sections.length && !sections.includes(activeSection)) {
+      setActiveSection(firstSection)
+    }
+  }, [sections.length, activeSection, firstSection])
 
   if (!token) return null
 
@@ -727,38 +881,59 @@ function AdminDashboard() {
       <header className="dashboard-header">
         <Link to="/" className="logo-link"><Logo /></Link>
         <nav>
-          <UserProfileDropdown label="Admin" type="admin" onLogout={handleLogout} />
+          <UserProfileDropdown label={isSuper ? 'Super Admin' : 'Admin'} type="admin" onLogout={handleLogout} />
         </nav>
       </header>
       <div className="admin-layout">
         <aside className="admin-sidebar">
           <nav className="admin-nav">
-            <button type="button" className={`admin-nav-item ${activeSection === 'overview' ? 'active' : ''}`} onClick={() => setActiveSection('overview')}>
-              <span className="nav-icon">📊</span> Overview
-            </button>
-            <button type="button" className={`admin-nav-item ${activeSection === 'users' ? 'active' : ''}`} onClick={() => setActiveSection('users')}>
-              <span className="nav-icon">👥</span> Users
-            </button>
-            <button type="button" className={`admin-nav-item ${activeSection === 'chat' ? 'active' : ''}`} onClick={() => setActiveSection('chat')}>
-              <span className="nav-icon">💬</span> Chat
-            </button>
-            <button type="button" className={`admin-nav-item ${activeSection === 'feed' ? 'active' : ''}`} onClick={() => setActiveSection('feed')}>
-              <span className="nav-icon">📰</span> Feed Manager
-            </button>
-            <button type="button" className={`admin-nav-item ${activeSection === 'games' ? 'active' : ''}`} onClick={() => setActiveSection('games')}>
-              <span className="nav-icon">🎮</span> Games
-            </button>
-            <Link to="/admin/settings" className="admin-nav-item">
-              <span className="nav-icon">⚙️</span> Settings
-            </Link>
+            {can('users') && (
+              <button type="button" className={`admin-nav-item ${activeSection === 'overview' ? 'active' : ''}`} onClick={() => setActiveSection('overview')}>
+                <span className="nav-icon">📊</span> Overview
+              </button>
+            )}
+            {can('users') && (
+              <button type="button" className={`admin-nav-item ${activeSection === 'users' ? 'active' : ''}`} onClick={() => setActiveSection('users')}>
+                <span className="nav-icon">👥</span> Users
+              </button>
+            )}
+            {can('chat') && (
+              <button type="button" className={`admin-nav-item ${activeSection === 'chat' ? 'active' : ''}`} onClick={() => setActiveSection('chat')}>
+                <span className="nav-icon">💬</span> Chat
+              </button>
+            )}
+            {can('feed') && (
+              <button type="button" className={`admin-nav-item ${activeSection === 'feed' ? 'active' : ''}`} onClick={() => setActiveSection('feed')}>
+                <span className="nav-icon">📰</span> Feed Manager
+              </button>
+            )}
+            {can('games') && (
+              <button type="button" className={`admin-nav-item ${activeSection === 'games' ? 'active' : ''}`} onClick={() => setActiveSection('games')}>
+                <span className="nav-icon">🎮</span> Games
+              </button>
+            )}
+            {can('admins') && (
+              <button type="button" className={`admin-nav-item ${activeSection === 'admins' ? 'active' : ''}`} onClick={() => setActiveSection('admins')}>
+                <span className="nav-icon">👑</span> Admins
+              </button>
+            )}
+            {can('settings') && (
+              <Link to="/admin/settings" className="admin-nav-item">
+                <span className="nav-icon">⚙️</span> Settings
+              </Link>
+            )}
           </nav>
         </aside>
         <main className="admin-content">
-          {activeSection === 'overview' && <AdminOverview token={token} onUnauthorized={() => { sessionStorage.removeItem(ADMIN_TOKEN_KEY); navigate('/login/admin') }} />}
-          {activeSection === 'users' && <AdminUsers token={token} signups={signups} onRefresh={setSignups} />}
-          {activeSection === 'chat' && <AdminChat token={token} signups={signups} />}
-          {activeSection === 'feed' && <AdminFeedManager token={token} />}
-          {activeSection === 'games' && <AdminGamesManager token={token} />}
+          {activeSection === 'overview' && can('users') && <AdminOverview token={token} onUnauthorized={() => { sessionStorage.removeItem(ADMIN_TOKEN_KEY); navigate('/login/admin') }} />}
+          {activeSection === 'users' && can('users') && <AdminUsers token={token} signups={signups} onRefresh={setSignups} />}
+          {activeSection === 'chat' && can('chat') && <AdminChat token={token} signups={signups} />}
+          {activeSection === 'feed' && can('feed') && <AdminFeedManager token={token} />}
+          {activeSection === 'games' && can('games') && <AdminGamesManager token={token} />}
+          {activeSection === 'admins' && can('admins') && <AdminAdmins token={token} isSuper={isSuper} />}
+          {activeSection === 'overview' && can('users') && (
+            <AdminOverview token={token} onUnauthorized={() => { sessionStorage.removeItem(ADMIN_TOKEN_KEY); navigate('/login/admin') }} />
+          )}
         </main>
       </div>
     </div>
