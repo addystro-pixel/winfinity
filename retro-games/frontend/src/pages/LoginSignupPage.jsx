@@ -127,6 +127,8 @@ function LoginSignupPage() {
           )}
 
           <p className="auth-admin">
+            Admin? <Link to="/login/admin">Login here</Link>
+            {' · '}
             <Link to="/games">Browse games</Link>
           </p>
         </div>
