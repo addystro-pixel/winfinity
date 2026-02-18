@@ -1,0 +1,22 @@
+.msg-status {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.35rem;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.msg-status-single,
+.msg-status-double {
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+
+.msg-status-single,
+.msg-status-double:not(.msg-status-seen) {
+  color: var(--text-muted);
+}
+
+.msg-status-seen {
+  color: var(--accent-primary);
+}

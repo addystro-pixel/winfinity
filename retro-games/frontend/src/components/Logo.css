@@ -1,0 +1,27 @@
+.logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-img {
+  display: block;
+  object-fit: contain;
+  height: auto;
+}
+
+.logo-medium .logo-img {
+  max-height: 48px;
+  max-width: 180px;
+}
+
+.logo-large .logo-img {
+  max-height: 140px;
+  max-width: 320px;
+}
+
+.logo-small .logo-img {
+  max-height: 32px;
+  max-width: 32px;
+}
+

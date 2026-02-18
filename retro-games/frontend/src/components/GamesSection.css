@@ -1,0 +1,156 @@
+.games-content {
+  /* Content only - parent provides card styling */
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.games-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--accent-gold);
+  margin-bottom: 1.5rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.games-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.game-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  transition: all 0.25s var(--ease-out);
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.game-card:hover {
+  background: var(--bg-card-hover);
+  border-color: rgba(251, 191, 36, 0.25);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+
+.game-icon,
+.game-logo {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+.game-icon {
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--accent-primary);
+  background: var(--accent-primary-dim);
+}
+
+.game-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.game-info h4 {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+
+.game-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-top: 0.25rem;
+  letter-spacing: 0.5px;
+}
+
+.game-status.live {
+  color: var(--accent-success);
+}
+
+.game-status.coming-soon {
+  color: var(--accent-gold);
+}
+
+.games-loading {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 2.5rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .games-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.625rem;
+  }
+
+  .game-card {
+    padding: 0.875rem;
+  }
+
+  .game-icon,
+  .game-logo {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+  }
+
+  .game-info h4 {
+    font-size: 0.9375rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .games-grid {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+
+  .game-card {
+    padding: 0.75rem 1rem;
+  }
+
+  .game-icon,
+  .game-logo {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+  }
+
+  .game-info h4 {
+    font-size: 0.875rem;
+  }
+
+  .games-loading {
+    padding: 1.5rem;
+  }
+}
