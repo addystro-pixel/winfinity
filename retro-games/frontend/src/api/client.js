@@ -164,6 +164,16 @@ export async function deleteSignup(id, token) {
   return json
 }
 
+export async function verifySignup(id, token) {
+  const res = await fetch(`${API_BASE}/api/admin/signups/${Number(id)}/verify`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(json.error || 'Verify failed')
+  return json
+}
+
 export async function verifyEmailToken(token) {
   const url = `${API_BASE}/api/verify?token=${encodeURIComponent(String(token || '').trim())}`
   const res = await fetch(url)

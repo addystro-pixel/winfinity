@@ -383,6 +383,16 @@ app.delete('/api/signups/:id', verifyAdminToken, (req, res) => {
   res.json({ success: true, message: 'User deleted' })
 })
 
+app.put('/api/admin/signups/:id/verify', verifyAdminToken, (req, res) => {
+  const id = parseInt(req.params.id, 10)
+  if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid ID' })
+  const signup = getSignupById(id)
+  if (!signup) return res.status(404).json({ error: 'User not found' })
+  if (signup.verified) return res.json({ success: true, message: 'Already verified' })
+  markSignupVerified(id)
+  res.json({ success: true, message: 'User verified' })
+})
+
 app.get('/api/admin/stats', verifyAdminToken, (req, res) => {
   try {
     const stats = getAdminStats()

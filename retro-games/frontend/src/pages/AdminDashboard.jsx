@@ -7,6 +7,7 @@ import MessageStatus from '../components/MessageStatus'
 import {
   getSignups,
   deleteSignup,
+  verifySignup,
   getAdminConversation,
   sendAdminReply,
   getAdminStats,
@@ -109,6 +110,7 @@ function AdminUsers({ token, signups, onRefresh }) {
   const [error, setError] = useState('')
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleting, setDeleting] = useState(false)
+  const [verifying, setVerifying] = useState(null)
   const navigate = useNavigate()
 
   const loadSignups = useCallback(async () => {
@@ -138,6 +140,19 @@ function AdminUsers({ token, signups, onRefresh }) {
       setError(err.message)
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const handleVerify = async (s) => {
+    if (!token || s.verified) return
+    setVerifying(s.id)
+    try {
+      await verifySignup(s.id, token)
+      onRefresh(signups.map((u) => (u.id === s.id ? { ...u, verified: true } : u)))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setVerifying(null)
     }
   }
 
@@ -174,6 +189,11 @@ function AdminUsers({ token, signups, onRefresh }) {
                   <td><span className={`verified-cell ${s.verified ? 'yes' : 'no'}`}>{s.verified ? 'Done' : 'Pending'}</span></td>
                   <td>{s.date ? new Date(s.date).toLocaleString() : '-'}</td>
                   <td>
+                    {!s.verified && (
+                      <button type="button" className="verify-btn" onClick={() => handleVerify(s)} disabled={verifying === s.id}>
+                        {verifying === s.id ? 'Verifying...' : 'Verify'}
+                      </button>
+                    )}
                     <button type="button" className="delete-btn" onClick={() => setDeleteTarget(s)}>Delete</button>
                   </td>
                 </tr>
