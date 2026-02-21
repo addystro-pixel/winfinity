@@ -8,6 +8,7 @@ import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 import multer from 'multer'
 import nodemailer from 'nodemailer'
+import { Resend } from 'resend'
 import {
   getAllSignups,
   createSignup,
@@ -66,6 +67,8 @@ const API_BASE = process.env.API_BASE || `http://localhost:${PORT}`
 const SITE_URL = process.env.SITE_URL || 'http://localhost:5173'
 const GMAIL_USER = process.env.GMAIL_USER
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD
+const RESEND_API_KEY = process.env.RESEND_API_KEY
+const RESEND_FROM = process.env.RESEND_FROM || 'Winfinity <onboarding@resend.dev>'
 
 const TOKEN_EXPIRY_HOURS = 24
 const JWT_SECRET = process.env.JWT_SECRET || 'winfinity-secret-change-in-production'
@@ -218,12 +221,39 @@ function requireAdminPermission(perm) {
 }
 
 async function sendVerificationEmail(to, token, userName) {
-  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
-    console.warn('GMAIL_USER and GMAIL_APP_PASSWORD not set - skipping email send')
-    return false
-  }
   const apiBase = process.env.API_BASE || `http://localhost:${PORT}`
   const verifyUrl = `${apiBase.replace(/\/$/, '')}/verify?token=${token}`
+  const html = `
+    <p>Hi ${userName || 'there'},</p>
+    <p>Thanks for signing up! Please verify your email by clicking the button below:</p>
+    <p style="margin: 24px 0;">
+      <a href="${verifyUrl}" style="display: inline-block; padding: 14px 28px; background: linear-gradient(135deg, #22d3ee 0%, #06b6d4 100%); color: #030712; text-decoration: none; font-weight: 600; font-size: 16px; border-radius: 10px; font-family: Arial, sans-serif;">Verify Email</a>
+    </p>
+    <p style="font-size: 12px; color: #666;">This link expires in 24 hours.</p>
+    <p>If you didn't sign up, you can ignore this email.</p>
+    <p>— Winfinity</p>
+  `
+
+  // Use Resend (reliable from cloud) - no connection timeout issues
+  if (RESEND_API_KEY) {
+    const resend = new Resend(RESEND_API_KEY)
+    const { error } = await resend.emails.send({
+      from: RESEND_FROM,
+      to: [to],
+      subject: 'Verify your email - Winfinity',
+      html,
+    })
+    if (error) {
+      throw new Error('Resend: ' + error.message)
+    }
+    return true
+  }
+
+  // Fallback: Gmail (can timeout from Render)
+  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
+    console.warn('Neither RESEND_API_KEY nor GMAIL credentials set - skipping email send')
+    return false
+  }
   const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
@@ -233,21 +263,13 @@ async function sendVerificationEmail(to, token, userName) {
       pass: GMAIL_APP_PASSWORD.trim(),
     },
     tls: { rejectUnauthorized: true },
+    connectionTimeout: 10000,
   })
   await transporter.sendMail({
     from: `"Winfinity" <${GMAIL_USER}>`,
     to,
     subject: 'Verify your email - Winfinity',
-    html: `
-      <p>Hi ${userName || 'there'},</p>
-      <p>Thanks for signing up! Please verify your email by clicking the button below:</p>
-      <p style="margin: 24px 0;">
-        <a href="${verifyUrl}" style="display: inline-block; padding: 14px 28px; background: linear-gradient(135deg, #22d3ee 0%, #06b6d4 100%); color: #030712; text-decoration: none; font-weight: 600; font-size: 16px; border-radius: 10px; font-family: Arial, sans-serif;">Verify Email</a>
-      </p>
-      <p style="font-size: 12px; color: #666;">This link expires in 24 hours.</p>
-      <p>If you didn't sign up, you can ignore this email.</p>
-      <p>— Winfinity</p>
-    `,
+    html,
   })
   return true
 }
