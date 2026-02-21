@@ -5,7 +5,7 @@
   "rootDirectory": "retro-games/frontend",
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!assets/)(?!api/)(?!favicon\\.ico)(?!vite\\.svg).*)",
       "destination": "/index.html"
     }
   ]

@@ -237,15 +237,17 @@ async function sendVerificationEmail(to, token, userName) {
   // Use Resend (reliable from cloud) - no connection timeout issues
   if (RESEND_API_KEY) {
     const resend = new Resend(RESEND_API_KEY)
-    const { error } = await resend.emails.send({
+    const { data, error } = await resend.emails.send({
       from: RESEND_FROM,
       to: [to],
       subject: 'Verify your email - Winfinity',
       html,
     })
     if (error) {
+      console.error('Resend error:', error.message, '| Code:', error.statusCode)
       throw new Error('Resend: ' + error.message)
     }
+    console.log('Resend: Email sent to', to, '| Id:', data?.id)
     return true
   }
 
