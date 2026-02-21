@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import Logo from '../components/Logo'
-import SignupForm from '../components/SignupForm'
 import UserProfileDropdown from '../components/UserProfileDropdown'
 import GamesSection from '../components/GamesSection'
 import ChatWithUs from '../components/ChatWithUs'
@@ -675,7 +674,7 @@ function DashboardContent() {
 }
 
 function UserDashboard() {
-  const { user, loading, isAuthenticated, refreshUser } = useAuth()
+  const { user, loading, isAuthenticated } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -693,23 +692,6 @@ function UserDashboard() {
   }
 
   if (!isAuthenticated) return null
-
-  if (!user?.verified) {
-    return (
-      <div className="auth-page">
-        <Link to="/" className="back-link">← Back to Home</Link>
-        <div className="auth-card user-card verification-gate">
-          <Logo size="medium" />
-          <h1>Complete your signup</h1>
-          <p className="auth-subtitle">Verify your email to access your profile, chat, and feed.</p>
-          <SignupForm initialEmail={user?.email} initialName={user?.name} />
-          <p className="verification-refresh">
-            Already verified? <button type="button" className="refresh-link" onClick={() => refreshUser()}>Refresh</button>
-          </p>
-        </div>
-      </div>
-    )
-  }
 
   return <DashboardContent />
 }

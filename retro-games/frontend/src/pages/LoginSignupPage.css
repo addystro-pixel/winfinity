@@ -228,6 +228,72 @@
   border-color: var(--accent-primary);
 }
 
+.auth-success-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1rem;
+  margin-bottom: 1rem;
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  border-radius: 12px;
+  color: var(--accent-success);
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+
+.auth-success-icon {
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.auth-success-dismiss {
+  margin-left: auto;
+  padding: 0.25rem;
+  font-size: 1.25rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.8;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.auth-success-dismiss:hover {
+  opacity: 1;
+}
+
+.auth-form .password-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth-form .password-input-wrap input {
+  padding-right: 2.75rem;
+}
+
+.auth-form .password-toggle {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0.25rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+}
+
+.auth-form .password-toggle:hover {
+  color: var(--text-secondary);
+}
+
 .form-error {
   color: #f87171;
   font-size: 0.875rem;
