@@ -63,7 +63,17 @@ Supabase does not seed admins. Create your first admin via the Supabase SQL Edit
 
 ---
 
-## 6. Supabase Storage (Uploads) – Optional
+## 6. Migration: Add login_count (if you have an existing database)
+
+If your `signups` table was created before this column existed, run in Supabase SQL Editor:
+
+```sql
+ALTER TABLE signups ADD COLUMN IF NOT EXISTS login_count INTEGER DEFAULT 0;
+```
+
+---
+
+## 7. Supabase Storage (Uploads) – Optional
 
 To store **uploads** (images, voice messages, feed media, game logos) in Supabase instead of local disk:
 

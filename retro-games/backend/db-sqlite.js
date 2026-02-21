@@ -44,6 +44,7 @@ if (!cols.includes('token_expires')) db.exec('ALTER TABLE signups ADD COLUMN tok
 if (!cols.includes('number_hash')) db.exec('ALTER TABLE signups ADD COLUMN number_hash TEXT')
 if (!cols.includes('password_hash')) db.exec('ALTER TABLE signups ADD COLUMN password_hash TEXT')
 if (!cols.includes('last_active')) db.exec('ALTER TABLE signups ADD COLUMN last_active TEXT')
+if (!cols.includes('login_count')) db.exec('ALTER TABLE signups ADD COLUMN login_count INTEGER DEFAULT 0')
 
 const ACTIVE_THRESHOLD_MINUTES = 5
 
@@ -184,7 +185,7 @@ if (!admin2Exists) {
 
 export async function getAllSignups() {
   const rows = db.prepare(`
-    SELECT id, name, email, number, date, verified, verification_token, last_active
+    SELECT id, name, email, number, date, verified, verification_token, last_active, login_count
     FROM signups ORDER BY id DESC
   `).all()
   return rows.map(r => ({
@@ -196,14 +197,16 @@ export async function getAllSignups() {
     verified: !!r.verified,
     verificationToken: r.verification_token,
     isActive: isActive(r.last_active),
+    loginCount: r.login_count ?? 0,
   }))
 }
 
-export async function createSignup({ name, email, number, numberHash, passwordHash, verificationToken, tokenExpires }) {
+export async function createSignup({ name, email, number, numberHash, passwordHash, verified = false, verificationToken, tokenExpires }) {
+  const verifiedVal = verified ? 1 : 0
   const result = db.prepare(`
     INSERT INTO signups (name, email, number, number_hash, password_hash, date, verified, verification_token, token_expires)
-    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
-  `).run(name, email, number, numberHash || null, passwordHash || null, new Date().toISOString(), verificationToken, tokenExpires)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(name, email, number, numberHash || null, passwordHash || null, new Date().toISOString(), verifiedVal, verificationToken || null, tokenExpires || null)
   return result.lastInsertRowid
 }
 
@@ -232,6 +235,14 @@ export async function updateVerificationToken(id, token, tokenExpires, passwordH
 
 export async function markSignupVerified(id) {
   db.prepare('UPDATE signups SET verified = 1, verification_token = NULL WHERE id = ?').run(id)
+}
+
+export async function updateSignupToVerified(id, passwordHash) {
+  db.prepare('UPDATE signups SET verified = 1, verification_token = NULL, token_expires = NULL, password_hash = ? WHERE id = ?').run(passwordHash, id)
+}
+
+export async function incrementLoginCount(userId) {
+  db.prepare('UPDATE signups SET login_count = COALESCE(login_count, 0) + 1 WHERE id = ?').run(userId)
 }
 
 export async function deleteSignup(id) {

@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS signups (
   verification_token TEXT,
   token_expires TEXT,
   password_hash TEXT,
-  last_active TIMESTAMPTZ
+  last_active TIMESTAMPTZ,
+  login_count INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_signups_email ON signups(LOWER(email));
 CREATE INDEX IF NOT EXISTS idx_signups_date ON signups(date);

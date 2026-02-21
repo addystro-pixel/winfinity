@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import { isValidEmail, isValidPhone } from '../utils/validation'
-import { submitSignup, resendVerification } from '../api/client'
+import { submitSignup } from '../api/client'
 import { COUNTRY_CODES } from '../config/countries'
 import './SignupForm.css'
 
-function SignupForm({ initialEmail = '', initialName = '' }) {
+function SignupForm({ initialEmail = '', initialName = '', onSuccess }) {
   const [formData, setFormData] = useState({
     name: initialName,
     email: initialEmail,
@@ -21,10 +21,7 @@ function SignupForm({ initialEmail = '', initialName = '' }) {
   }, [initialEmail, initialName])
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
-  const [submittedEmail, setSubmittedEmail] = useState('')
   const [submitError, setSubmitError] = useState('')
-  const [resending, setResending] = useState(false)
-  const [resendMessage, setResendMessage] = useState('')
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -45,7 +42,7 @@ function SignupForm({ initialEmail = '', initialName = '' }) {
       return
     }
     if (!isValidPhone(formData.number, formData.countryCode)) {
-      setErrors(prev => ({ ...prev, number: 'Please enter a valid phone number for the selected country' }))
+      setErrors(prev => ({ ...prev, number: 'Please enter a valid phone number for your selected country' }))
       return
     }
     if (!formData.password || formData.password.length < 6) {
@@ -62,10 +59,10 @@ function SignupForm({ initialEmail = '', initialName = '' }) {
         number: formData.number.trim(),
         password: formData.password,
       })
-      setSubmitted(true)
-      setSubmittedEmail(formData.email)
       setFormData({ name: '', email: '', countryCode: '+1', number: '', password: '' })
       setErrors({})
+      setSubmitError('')
+      setSubmitted(true)
     } catch (err) {
       setSubmitError(err.message || 'Something went wrong. Please try again.')
     } finally {
@@ -73,34 +70,15 @@ function SignupForm({ initialEmail = '', initialName = '' }) {
     }
   }
 
-  const handleResend = async () => {
-    if (!submittedEmail) return
-    setResending(true)
-    setSubmitError('')
-    setResendMessage('')
-    try {
-      const data = await resendVerification(submittedEmail)
-      setResendMessage(data.message || 'Email sent! Check your inbox.')
-    } catch (err) {
-      setSubmitError(err.message || 'Resend failed')
-    } finally {
-      setResending(false)
-    }
-  }
-
   if (submitted) {
     return (
       <div className="signup-success">
         <div className="success-icon">✓</div>
-        <p>Verification email sent!</p>
-        <p className="signup-success-sub">Check your inbox and click the link to complete signup.</p>
-        {submittedEmail && (
-          <button type="button" className="resend-btn" onClick={handleResend} disabled={resending}>
-            {resending ? 'Sending...' : 'Resend verification email'}
-          </button>
-        )}
-        {resendMessage && <p className="resend-success">{resendMessage}</p>}
-        {submitError && <p className="submit-error">{submitError}</p>}
+        <p>Account created successfully!</p>
+        <p className="signup-success-sub">You can now sign in with your email and password.</p>
+        <button type="button" className="resend-btn" onClick={() => onSuccess?.()}>
+          Sign in
+        </button>
       </div>
     )
   }

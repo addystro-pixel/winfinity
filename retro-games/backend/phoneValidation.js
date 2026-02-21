@@ -1,60 +1,73 @@
-// Phone length rules by country code (digits only, excluding country code)
-export const PHONE_LENGTHS = {
-  '+1': { min: 10, max: 10 },      // US/Canada
-  '+7': { min: 10, max: 10 },      // Russia
-  '+20': { min: 9, max: 10 },
-  '+61': { min: 9, max: 9 },
-  '+27': { min: 9, max: 9 },
-  '+30': { min: 10, max: 10 },
-  '+31': { min: 9, max: 9 },
-  '+32': { min: 8, max: 9 },
-  '+33': { min: 9, max: 9 },
-  '+34': { min: 9, max: 9 },
-  '+39': { min: 9, max: 11 },
-  '+41': { min: 9, max: 9 },
-  '+43': { min: 10, max: 13 },
-  '+44': { min: 10, max: 11 },     // UK
-  '+45': { min: 8, max: 8 },
-  '+46': { min: 9, max: 10 },
-  '+47': { min: 8, max: 8 },
-  '+48': { min: 9, max: 9 },
-  '+49': { min: 10, max: 11 },     // Germany
-  '+51': { min: 9, max: 9 },
-  '+52': { min: 10, max: 10 },
-  '+54': { min: 10, max: 11 },
-  '+55': { min: 10, max: 11 },
-  '+56': { min: 9, max: 9 },
-  '+57': { min: 10, max: 10 },
-  '+58': { min: 10, max: 10 },
-  '+60': { min: 9, max: 10 },
-  '+62': { min: 10, max: 12 },
-  '+63': { min: 10, max: 10 },
-  '+64': { min: 9, max: 10 },
-  '+65': { min: 8, max: 8 },
-  '+66': { min: 9, max: 9 },
-  '+81': { min: 10, max: 11 },     // Japan
-  '+82': { min: 9, max: 10 },
-  '+84': { min: 9, max: 10 },
-  '+86': { min: 11, max: 11 },     // China
-  '+90': { min: 10, max: 10 },
-  '+91': { min: 10, max: 10 },     // India
-  '+92': { min: 10, max: 10 },
-  '+94': { min: 9, max: 9 },
-  '+97': { min: 9, max: 9 },       // UAE (971), Saudi (966) - use 97 prefix
-  '+971': { min: 9, max: 9 },
-  '+966': { min: 9, max: 9 },
-  '+972': { min: 9, max: 9 },
-  '+977': { min: 10, max: 10 },    // Nepal
-  '+98': { min: 10, max: 10 },
-  '+234': { min: 10, max: 10 },
-  '+254': { min: 9, max: 9 },
-  '+351': { min: 9, max: 9 },
-  '+353': { min: 9, max: 9 },
-  '+358': { min: 9, max: 10 },
-  '+593': { min: 9, max: 9 },
-  '+880': { min: 10, max: 10 },
+import { isValidPhoneNumber } from 'libphonenumber-js'
+
+// Map dial code to ISO country for libphonenumber validation
+const COUNTRY_CODE_TO_ISO = {
+  '+1': 'US',
+  '+44': 'GB',
+  '+91': 'IN',
+  '+61': 'AU',
+  '+81': 'JP',
+  '+86': 'CN',
+  '+49': 'DE',
+  '+33': 'FR',
+  '+39': 'IT',
+  '+34': 'ES',
+  '+31': 'NL',
+  '+32': 'BE',
+  '+41': 'CH',
+  '+43': 'AT',
+  '+46': 'SE',
+  '+47': 'NO',
+  '+45': 'DK',
+  '+358': 'FI',
+  '+353': 'IE',
+  '+351': 'PT',
+  '+48': 'PL',
+  '+7': 'RU',
+  '+82': 'KR',
+  '+65': 'SG',
+  '+60': 'MY',
+  '+63': 'PH',
+  '+66': 'TH',
+  '+84': 'VN',
+  '+62': 'ID',
+  '+971': 'AE',
+  '+966': 'SA',
+  '+972': 'IL',
+  '+20': 'EG',
+  '+27': 'ZA',
+  '+234': 'NG',
+  '+254': 'KE',
+  '+55': 'BR',
+  '+52': 'MX',
+  '+54': 'AR',
+  '+57': 'CO',
+  '+58': 'VE',
+  '+51': 'PE',
+  '+56': 'CL',
+  '+593': 'EC',
+  '+90': 'TR',
+  '+98': 'IR',
+  '+92': 'PK',
+  '+880': 'BD',
+  '+94': 'LK',
+  '+977': 'NP',
+  '+64': 'NZ',
 }
 
+/**
+ * Validates phone number for the selected country.
+ * Ensures the number format is valid for that country (e.g. India: 10 digits starting 6-9).
+ */
+export function isValidPhone(number, countryCode = '+1') {
+  const cleaned = String(number || '').replace(/\D/g, '')
+  if (!cleaned.length) return false
+  const isoCountry = COUNTRY_CODE_TO_ISO[countryCode] || 'US'
+  const fullNumber = `${String(countryCode || '+1').replace(/\s/g, '')}${cleaned}`
+  return isValidPhoneNumber(fullNumber, isoCountry)
+}
+
+// Legacy export for backward compatibility (server may still import this)
 export function getPhoneLengthForCountry(countryCode) {
-  return PHONE_LENGTHS[countryCode || '+1'] || { min: 7, max: 15 }
+  return { min: 7, max: 15 }
 }

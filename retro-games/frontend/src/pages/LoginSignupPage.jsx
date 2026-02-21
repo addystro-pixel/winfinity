@@ -71,7 +71,7 @@ function LoginForm({ onSwitchToSignup }) {
 function SignupPanel({ onSwitchToLogin }) {
   return (
     <div className="signup-panel">
-      <SignupForm />
+      <SignupForm onSuccess={onSwitchToLogin} />
       <p className="auth-switch">
         Already have an account?{' '}
         <button type="button" className="switch-link" onClick={onSwitchToLogin}>

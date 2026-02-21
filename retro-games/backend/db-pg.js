@@ -37,7 +37,7 @@ export async function isUserActive(userId) {
 
 export async function getAllSignups() {
   const r = await pool.query(`
-    SELECT id, name, email, number, date, verified, verification_token, last_active
+    SELECT id, name, email, number, date, verified, verification_token, last_active, COALESCE(login_count, 0) as login_count
     FROM signups ORDER BY id DESC
   `)
   return r.rows.map(row => ({
@@ -49,15 +49,16 @@ export async function getAllSignups() {
     verified: !!row.verified,
     verificationToken: row.verification_token,
     isActive: isActive(row.last_active),
+    loginCount: row.login_count ?? 0,
   }))
 }
 
-export async function createSignup({ name, email, number, numberHash, passwordHash, verificationToken, tokenExpires }) {
+export async function createSignup({ name, email, number, numberHash, passwordHash, verified = false, verificationToken, tokenExpires }) {
   const r = await pool.query(`
     INSERT INTO signups (name, email, number, number_hash, password_hash, date, verified, verification_token, token_expires)
-    VALUES ($1, $2, $3, $4, $5, NOW(), 0, $6, $7)
+    VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8)
     RETURNING id
-  `, [name, email, number, numberHash || null, passwordHash || null, verificationToken, tokenExpires])
+  `, [name, email, number, numberHash || null, passwordHash || null, verified ? 1 : 0, verificationToken || null, tokenExpires || null])
   return r.rows[0].id
 }
 
@@ -95,6 +96,18 @@ export async function markSignupVerified(id) {
   await pool.query(`
     UPDATE signups SET verified = 1, verification_token = NULL WHERE id = $1
   `, [id])
+}
+
+export async function updateSignupToVerified(id, passwordHash) {
+  await pool.query(`
+    UPDATE signups SET verified = 1, verification_token = NULL, token_expires = NULL, password_hash = $1 WHERE id = $2
+  `, [passwordHash, id])
+}
+
+export async function incrementLoginCount(userId) {
+  await pool.query(`
+    UPDATE signups SET login_count = COALESCE(login_count, 0) + 1 WHERE id = $1
+  `, [userId])
 }
 
 export async function deleteSignup(id) {

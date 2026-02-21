@@ -178,6 +178,7 @@ function AdminUsers({ token, signups, onRefresh }) {
                 <th>Email</th>
                 <th>Phone</th>
                 <th>Verified</th>
+                <th>Logins</th>
                 <th>Date</th>
                 <th>Actions</th>
               </tr>
@@ -190,6 +191,7 @@ function AdminUsers({ token, signups, onRefresh }) {
                   <td>{s.email}</td>
                   <td>{s.number}</td>
                   <td><span className={`verified-cell ${s.verified ? 'yes' : 'no'}`}>{s.verified ? 'Done' : 'Pending'}</span></td>
+                  <td>{s.loginCount ?? 0}</td>
                   <td>{s.date ? new Date(s.date).toLocaleString() : '-'}</td>
                   <td>
                     {!s.verified && (

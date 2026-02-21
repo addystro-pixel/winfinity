@@ -16,7 +16,9 @@ import {
   getSignupByEmail,
   getSignupById,
   updateVerificationToken,
+  updateSignupToVerified,
   markSignupVerified,
+  incrementLoginCount,
   deleteSignup,
   addMessage,
   getMessagesByUser,
@@ -56,7 +58,7 @@ import {
   isUserActive,
   createAdmin,
 } from './db.js'
-import { getPhoneLengthForCountry } from './phoneValidation.js'
+import { isValidPhone as isValidPhoneBackend } from './phoneValidation.js'
 import { uploadFile, getFileUrl, useSupabaseStorage } from './storage.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -181,9 +183,7 @@ function isValidEmail(email) {
 }
 
 function isValidPhone(number, countryCode) {
-  const cleaned = String(number || '').replace(/\D/g, '')
-  const { min, max } = getPhoneLengthForCountry(countryCode)
-  return cleaned.length >= min && cleaned.length <= max
+  return isValidPhoneBackend(number, countryCode)
 }
 
 function hashSensitive(value) {
@@ -301,14 +301,12 @@ app.post('/api/signup', async (req, res) => {
     return res.status(400).json({ error: 'This email is already registered. Please login.' })
   }
 
-  const verificationToken = crypto.randomBytes(32).toString('hex')
-  const tokenExpires = new Date(Date.now() + TOKEN_EXPIRY_HOURS * 60 * 60 * 1000).toISOString()
   const fullNumber = `${code} ${localNumber}`.trim()
   const numberHash = hashSensitive(fullNumber)
   const passwordHash = hashPassword(password)
 
   if (existing) {
-    await updateVerificationToken(existing.id, verificationToken, tokenExpires, passwordHash)
+    await updateSignupToVerified(existing.id, passwordHash)
   } else {
     await createSignup({
       name: name.trim(),
@@ -316,19 +314,13 @@ app.post('/api/signup', async (req, res) => {
       number: fullNumber,
       numberHash,
       passwordHash,
-      verificationToken,
-      tokenExpires,
+      verified: true,
     })
   }
 
-  // Send email in background so signup responds quickly
-  sendVerificationEmail(emailLower, verificationToken, name.trim())
-    .then(sent => { if (sent) console.log('Verification email sent to', emailLower) })
-    .catch(err => console.error('Email send failed:', err.message))
-
   res.json({
     success: true,
-    message: 'Signup received! Check your inbox (and spam folder) for the verification email and click the link to complete.',
+    message: 'Account created successfully. You can now sign in.',
   })
 })
 
@@ -433,6 +425,7 @@ app.get('/api/signups', verifyAdminToken, requireAdminPermission('users'), async
     date: s.date,
     verified: s.verified,
     isActive: s.isActive,
+    loginCount: s.loginCount ?? 0,
   })))
 })
 
@@ -857,6 +850,7 @@ app.post('/api/user/login', async (req, res) => {
     return res.status(401).json({ error: 'Invalid email or password' })
   }
   await updateUserActive(user.id)
+  await incrementLoginCount(user.id)
   const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' })
   res.json({
     success: true,
