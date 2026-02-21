@@ -56,6 +56,7 @@ import {
   createAdmin,
 } from './db.js'
 import { getPhoneLengthForCountry } from './phoneValidation.js'
+import { uploadFile, getFileUrl, useSupabaseStorage } from './storage.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.join(__dirname, '.env') })
@@ -82,13 +83,13 @@ function verifyPassword(password, stored) {
   return hash === verify
 }
 
-function verifyUserToken(req, res, next) {
+async function verifyUserToken(req, res, next) {
   const auth = req.headers.authorization?.replace('Bearer ', '')
   if (!auth) return res.status(401).json({ error: 'Login required' })
   try {
     const decoded = jwt.verify(auth, JWT_SECRET)
     req.userId = decoded.userId
-    updateUserActive(req.userId)
+    await updateUserActive(req.userId)
     next()
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' })
@@ -98,56 +99,73 @@ function verifyUserToken(req, res, next) {
 const UPLOADS_DIR = path.join(__dirname, 'data', 'uploads')
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true })
 
-const storage = multer.diskStorage({
+const msgFileFilter = (req, file, cb) => {
+  const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg']
+  if (allowed.includes(file.mimetype)) cb(null, true)
+  else cb(new Error('Invalid file type'))
+}
+const feedFileFilter = (req, file, cb) => {
+  const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/webm', 'video/quicktime']
+  if (allowed.includes(file.mimetype)) cb(null, true)
+  else cb(new Error('Invalid file type'))
+}
+const gameFileFilter = (req, file, cb) => {
+  const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+  if (allowed.includes(file.mimetype)) cb(null, true)
+  else cb(new Error('Invalid file type'))
+}
+
+const diskStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
   filename: (req, file, cb) => {
     const ext = file.mimetype === 'audio/webm' || file.mimetype === 'audio/ogg' ? '.webm' : path.extname(file.originalname) || '.jpg'
     cb(null, `msg_${Date.now()}_${crypto.randomBytes(8).toString('hex')}${ext}`)
   },
 })
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg']
-    if (allowed.includes(file.mimetype)) cb(null, true)
-    else cb(new Error('Invalid file type'))
-  },
-})
-
-const feedStorage = multer.diskStorage({
+const feedDiskStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname) || (file.mimetype.startsWith('video/') ? '.mp4' : '.jpg')
     cb(null, `feed_${Date.now()}_${crypto.randomBytes(8).toString('hex')}${ext}`)
   },
 })
-const feedUpload = multer({
-  storage: feedStorage,
-  limits: { fileSize: 50 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/webm', 'video/quicktime']
-    if (allowed.includes(file.mimetype)) cb(null, true)
-    else cb(new Error('Invalid file type'))
-  },
-})
-
-const gameLogoStorage = multer.diskStorage({
+const gameDiskStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname) || '.jpg'
     cb(null, `game_${Date.now()}_${crypto.randomBytes(8).toString('hex')}${ext}`)
   },
 })
-const gameLogoUpload = multer({
-  storage: gameLogoStorage,
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
-    if (allowed.includes(file.mimetype)) cb(null, true)
-    else cb(new Error('Invalid file type'))
-  },
+
+const upload = multer({
+  storage: useSupabaseStorage ? multer.memoryStorage() : diskStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: msgFileFilter,
 })
+const feedUpload = multer({
+  storage: useSupabaseStorage ? multer.memoryStorage() : feedDiskStorage,
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: feedFileFilter,
+})
+const gameLogoUpload = multer({
+  storage: useSupabaseStorage ? multer.memoryStorage() : gameDiskStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: gameFileFilter,
+})
+
+async function processUploadedFile(file, prefix, folder) {
+  if (!file) return null
+  if (useSupabaseStorage && file.buffer) {
+    let ext = path.extname(file.originalname)
+    if (!ext) {
+      if (file.mimetype === 'audio/webm' || file.mimetype === 'audio/ogg') ext = '.webm'
+      else if (file.mimetype.startsWith('video/')) ext = '.mp4'
+      else ext = '.jpg'
+    }
+    return uploadFile(file.buffer, prefix, folder, ext, file.mimetype)
+  }
+  return file.filename
+}
 
 const app = express()
 app.use(cors({ origin: true }))
@@ -170,14 +188,14 @@ function hashSensitive(value) {
 }
 
 
-function verifyAdminToken(req, res, next) {
+async function verifyAdminToken(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '')
   if (!token) return res.status(401).json({ error: 'Unauthorized' })
   try {
     const decoded = jwt.verify(token, JWT_SECRET)
     if (decoded.adminId) {
       req.adminId = decoded.adminId
-      const admin = getAdminById(decoded.adminId)
+      const admin = await getAdminById(decoded.adminId)
       if (admin) {
         req.admin = {
           ...admin,
@@ -204,7 +222,8 @@ async function sendVerificationEmail(to, token, userName) {
     console.warn('GMAIL_USER and GMAIL_APP_PASSWORD not set - skipping email send')
     return false
   }
-  const verifyUrl = `http://localhost:${PORT}/verify?token=${token}`
+  const apiBase = process.env.API_BASE || `http://localhost:${PORT}`
+  const verifyUrl = `${apiBase.replace(/\/$/, '')}/verify?token=${token}`
   const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
@@ -252,7 +271,7 @@ app.post('/api/signup', async (req, res) => {
   }
 
   const emailLower = email.trim().toLowerCase()
-  const existing = getSignupByEmail(emailLower)
+  const existing = await getSignupByEmail(emailLower)
 
   if (existing && existing.verified) {
     return res.status(400).json({ error: 'This email is already registered. Please login.' })
@@ -265,9 +284,9 @@ app.post('/api/signup', async (req, res) => {
   const passwordHash = hashPassword(password)
 
   if (existing) {
-    updateVerificationToken(existing.id, verificationToken, tokenExpires, passwordHash)
+    await updateVerificationToken(existing.id, verificationToken, tokenExpires, passwordHash)
   } else {
-    createSignup({
+    await createSignup({
       name: name.trim(),
       email: emailLower,
       number: fullNumber,
@@ -278,20 +297,14 @@ app.post('/api/signup', async (req, res) => {
     })
   }
 
-  let emailSent = false
-  try {
-    emailSent = await sendVerificationEmail(emailLower, verificationToken, name.trim())
-    if (emailSent) console.log('Verification email sent to', emailLower)
-  } catch (err) {
-    console.error('Email send failed:', err.message)
-    console.error('Full error:', err)
-  }
+  // Send email in background so signup responds quickly
+  sendVerificationEmail(emailLower, verificationToken, name.trim())
+    .then(sent => { if (sent) console.log('Verification email sent to', emailLower) })
+    .catch(err => console.error('Email send failed:', err.message))
 
   res.json({
     success: true,
-    message: emailSent
-      ? 'Verification email sent! Check your inbox (and spam folder) and click the link to complete.'
-      : 'Signup received. Email failed to send - check server logs. Configure GMAIL_USER and GMAIL_APP_PASSWORD in backend/.env',
+    message: 'Signup received! Check your inbox (and spam folder) for the verification email and click the link to complete.',
   })
 })
 
@@ -301,7 +314,7 @@ app.post('/api/resend-verification', async (req, res) => {
   if (!emailLower) {
     return res.status(400).json({ error: 'Email is required' })
   }
-  const existing = getSignupByEmail(emailLower)
+  const existing = await getSignupByEmail(emailLower)
   if (!existing) {
     return res.status(404).json({ error: 'No signup found for this email. Please sign up first.' })
   }
@@ -311,29 +324,25 @@ app.post('/api/resend-verification', async (req, res) => {
   const verificationToken = crypto.randomBytes(32).toString('hex')
   const tokenExpires = new Date(Date.now() + TOKEN_EXPIRY_HOURS * 60 * 60 * 1000).toISOString()
   const passwordHash = password && String(password).length >= 6 ? hashPassword(password) : null
-  updateVerificationToken(existing.id, verificationToken, tokenExpires, passwordHash)
-  let emailSent = false
-  try {
-    emailSent = await sendVerificationEmail(emailLower, verificationToken, existing.name)
-    if (emailSent) console.log('Resend: verification email sent to', emailLower)
-  } catch (err) {
-    console.error('Resend email failed:', err.message)
-  }
+  await updateVerificationToken(existing.id, verificationToken, tokenExpires, passwordHash)
+  // Send email in background for faster response
+  sendVerificationEmail(emailLower, verificationToken, existing.name)
+    .then(sent => { if (sent) console.log('Resend: verification email sent to', emailLower) })
+    .catch(err => console.error('Resend email failed:', err.message))
+
   res.json({
     success: true,
-    message: emailSent
-      ? 'Verification email sent! Check your inbox and spam folder.'
-      : 'Resend failed. Check server logs for errors.',
+    message: 'If your email is registered, a verification link has been sent. Check your inbox and spam folder.',
   })
 })
 
-app.get('/verify', (req, res) => {
+app.get('/verify', async (req, res) => {
   const token = (req.query.token || '').trim()
   const siteUrl = (SITE_URL || 'http://localhost:5173').replace(/\/$/, '')
 
   if (!token) return res.redirect(`${siteUrl}/verify?error=invalid`)
 
-  const signup = getSignupByToken(token)
+  const signup = await getSignupByToken(token)
   if (!signup) {
     return res.redirect(`${siteUrl}/verify?done=1&already=1`)
   }
@@ -345,15 +354,15 @@ app.get('/verify', (req, res) => {
     return res.redirect(`${siteUrl}/verify?error=expired`)
   }
 
-  markSignupVerified(signup.id)
+  await markSignupVerified(signup.id)
   res.redirect(`${siteUrl}/verify?done=1`)
 })
 
-app.get('/api/verify', (req, res) => {
+app.get('/api/verify', async (req, res) => {
   const token = (req.query.token || '').trim()
   if (!token) return res.status(400).json({ error: 'Token required', status: 'invalid' })
 
-  const signup = getSignupByToken(token)
+  const signup = await getSignupByToken(token)
   if (!signup) {
     return res.json({ success: false, status: 'invalid', message: 'Invalid or expired verification link' })
   }
@@ -365,13 +374,13 @@ app.get('/api/verify', (req, res) => {
     return res.json({ success: false, status: 'expired', message: 'This verification link has expired.' })
   }
 
-  markSignupVerified(signup.id)
+  await markSignupVerified(signup.id)
   res.json({ success: true, status: 'verified', message: 'Your email has been successfully verified.' })
 })
 
-app.post('/api/admin/login', (req, res) => {
+app.post('/api/admin/login', async (req, res) => {
   const { email, password } = req.body || {}
-  const admin = getAdminByEmail(email?.trim())
+  const admin = await getAdminByEmail(email?.trim())
   if (!admin || !verifyPassword(password, admin.password_hash)) {
     return res.status(401).json({ error: 'Invalid email or password' })
   }
@@ -390,8 +399,8 @@ app.post('/api/admin/login', (req, res) => {
   })
 })
 
-app.get('/api/signups', verifyAdminToken, requireAdminPermission('users'), (req, res) => {
-  const signups = getAllSignups()
+app.get('/api/signups', verifyAdminToken, requireAdminPermission('users'), async (req, res) => {
+  const signups = await getAllSignups()
   res.json(signups.map(s => ({
     id: s.id,
     name: s.name,
@@ -403,27 +412,27 @@ app.get('/api/signups', verifyAdminToken, requireAdminPermission('users'), (req,
   })))
 })
 
-app.delete('/api/signups/:id', verifyAdminToken, requireAdminPermission('users'), (req, res) => {
+app.delete('/api/signups/:id', verifyAdminToken, requireAdminPermission('users'), async (req, res) => {
   const id = parseInt(req.params.id, 10)
   if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid ID' })
-  const result = deleteSignup(id)
+  const result = await deleteSignup(id)
   if (result.changes === 0) return res.status(404).json({ error: 'User not found' })
   res.json({ success: true, message: 'User deleted' })
 })
 
-app.put('/api/admin/signups/:id/verify', verifyAdminToken, requireAdminPermission('users'), (req, res) => {
+app.put('/api/admin/signups/:id/verify', verifyAdminToken, requireAdminPermission('users'), async (req, res) => {
   const id = parseInt(req.params.id, 10)
   if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid ID' })
-  const signup = getSignupById(id)
+  const signup = await getSignupById(id)
   if (!signup) return res.status(404).json({ error: 'User not found' })
   if (signup.verified) return res.json({ success: true, message: 'Already verified' })
-  markSignupVerified(id)
+  await markSignupVerified(id)
   res.json({ success: true, message: 'User verified' })
 })
 
-app.get('/api/admin/stats', verifyAdminToken, requireAdminPermission('users'), (req, res) => {
+app.get('/api/admin/stats', verifyAdminToken, requireAdminPermission('users'), async (req, res) => {
   try {
-    const stats = getAdminStats()
+    const stats = await getAdminStats()
     res.json(stats)
   } catch (err) {
     console.error('getAdminStats error:', err)
@@ -432,115 +441,113 @@ app.get('/api/admin/stats', verifyAdminToken, requireAdminPermission('users'), (
 })
 
 function mapFeedPostsWithUrls(posts) {
-  const baseUrl = process.env.API_BASE || `http://localhost:${PORT}`
   return posts.map(p => ({
     ...p,
-    imageUrl: p.image_url ? `${baseUrl}/uploads/${p.image_url}` : null,
-    videoUrl: p.video_url ? `${baseUrl}/uploads/${p.video_url}` : null,
+    imageUrl: getFileUrl(p.image_url),
+    videoUrl: getFileUrl(p.video_url),
   }))
 }
 
-app.get('/api/admin/feed', verifyAdminToken, requireAdminPermission('feed'), (req, res) => {
-  const posts = getFeedPosts()
+app.get('/api/admin/feed', verifyAdminToken, requireAdminPermission('feed'), async (req, res) => {
+  const posts = await getFeedPosts()
   res.json(mapFeedPostsWithUrls(posts))
 })
 
 app.post('/api/admin/feed', verifyAdminToken, requireAdminPermission('feed'), (req, res) => {
-  return feedUpload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }])(req, res, (err) => {
+  return feedUpload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }])(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message || 'Upload failed' })
     const { title, content } = req.body || {}
     if (!title?.trim()) return res.status(400).json({ error: 'Title required' })
     const imageFile = req.files?.image?.[0]
     const videoFile = req.files?.video?.[0]
-    const imageUrl = imageFile ? imageFile.filename : null
-    const videoUrl = videoFile ? videoFile.filename : null
-    const id = createFeedPost(title.trim(), (content || '').trim(), imageUrl, videoUrl)
+    const imageUrl = await processUploadedFile(imageFile, 'feed', 'feed')
+    const videoUrl = await processUploadedFile(videoFile, 'feed', 'feed')
+    const id = await createFeedPost(title.trim(), (content || '').trim(), imageUrl, videoUrl)
     res.json({ success: true, id })
   })
 })
 
 app.put('/api/admin/feed/:id', verifyAdminToken, requireAdminPermission('feed'), (req, res) => {
-  return feedUpload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }])(req, res, (err) => {
+  return feedUpload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }])(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message || 'Upload failed' })
     const id = parseInt(req.params.id, 10)
     if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid ID' })
-    const existing = getFeedPostById(id)
+    const existing = await getFeedPostById(id)
     if (!existing) return res.status(404).json({ error: 'Post not found' })
     const { title, content, clearImage, clearVideo } = req.body || {}
     const imageFile = req.files?.image?.[0]
     const videoFile = req.files?.video?.[0]
     let imageUrl = existing.image_url
     let videoUrl = existing.video_url
-    if (imageFile) imageUrl = imageFile.filename
+    if (imageFile) imageUrl = await processUploadedFile(imageFile, 'feed', 'feed')
     else if (clearImage === 'true' || clearImage === true) imageUrl = null
-    if (videoFile) videoUrl = videoFile.filename
+    if (videoFile) videoUrl = await processUploadedFile(videoFile, 'feed', 'feed')
     else if (clearVideo === 'true' || clearVideo === true) videoUrl = null
-    updateFeedPost(id, (title ?? existing.title).trim(), (content ?? existing.content ?? '').trim(), imageUrl, videoUrl)
+    await updateFeedPost(id, (title ?? existing.title).trim(), (content ?? existing.content ?? '').trim(), imageUrl, videoUrl)
     res.json({ success: true })
   })
 })
 
-app.delete('/api/admin/feed/:id', verifyAdminToken, requireAdminPermission('feed'), (req, res) => {
+app.delete('/api/admin/feed/:id', verifyAdminToken, requireAdminPermission('feed'), async (req, res) => {
   const id = parseInt(req.params.id, 10)
   if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid ID' })
-  const result = deleteFeedPost(id)
+  const result = await deleteFeedPost(id)
   if (result.changes === 0) return res.status(404).json({ error: 'Post not found' })
   res.json({ success: true })
 })
 
 function mapGamesWithUrls(games) {
-  const baseUrl = process.env.API_BASE || `http://localhost:${PORT}`
   return games.map(g => ({
     id: g.id,
     name: g.name,
     link: g.link || null,
-    logoUrl: g.logo_path ? `${baseUrl}/uploads/${g.logo_path}` : null,
+    logoUrl: getFileUrl(g.logo_path),
     sortOrder: g.sort_order,
   }))
 }
 
-app.get('/api/games', (req, res) => {
-  const games = getGames()
+app.get('/api/games', async (req, res) => {
+  const games = await getGames()
   res.json(mapGamesWithUrls(games))
 })
 
-app.get('/api/admin/games', verifyAdminToken, requireAdminPermission('games'), (req, res) => {
-  const games = getGames()
+app.get('/api/admin/games', verifyAdminToken, requireAdminPermission('games'), async (req, res) => {
+  const games = await getGames()
   res.json(mapGamesWithUrls(games))
 })
 
-app.post('/api/admin/games', verifyAdminToken, requireAdminPermission('games'), (req, res, next) => {
+app.post('/api/admin/games', verifyAdminToken, requireAdminPermission('games'), async (req, res, next) => {
   const contentType = req.headers['content-type'] || ''
   if (contentType.includes('multipart/form-data')) {
-    return gameLogoUpload.single('logo')(req, res, (err) => {
+    return gameLogoUpload.single('logo')(req, res, async (err) => {
       if (err) return res.status(400).json({ error: err.message || 'Upload failed' })
       const { name, link } = req.body || {}
       if (!name?.trim()) return res.status(400).json({ error: 'Game name required' })
-      const logoFile = req.file
-      const id = createGame(name.trim(), link?.trim() || null, logoFile?.filename || null)
+      const logoPath = await processUploadedFile(req.file, 'game', 'games')
+      const id = await createGame(name.trim(), link?.trim() || null, logoPath)
       res.json({ success: true, id })
     })
   }
   const { name, link } = req.body || {}
   if (!name?.trim()) return res.status(400).json({ error: 'Game name required' })
-  const id = createGame(name.trim(), link?.trim() || null, null)
+  const id = await createGame(name.trim(), link?.trim() || null, null)
   res.json({ success: true, id })
 })
 
-app.put('/api/admin/games/:id', verifyAdminToken, requireAdminPermission('games'), (req, res, next) => {
+app.put('/api/admin/games/:id', verifyAdminToken, requireAdminPermission('games'), async (req, res, next) => {
   const contentType = req.headers['content-type'] || ''
-  const handler = (err) => {
+  const handler = async (err) => {
     if (err) return res.status(400).json({ error: err.message || 'Upload failed' })
     const id = parseInt(req.params.id, 10)
     if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid ID' })
-    const existing = getGameById(id)
+    const existing = await getGameById(id)
     if (!existing) return res.status(404).json({ error: 'Game not found' })
     const { name, link, clearLogo } = req.body || {}
     const logoFile = req.file
     let logoPath = existing.logo_path
-    if (logoFile) logoPath = logoFile.filename
+    if (logoFile) logoPath = await processUploadedFile(logoFile, 'game', 'games')
     else if (clearLogo === 'true' || clearLogo === true) logoPath = null
-    updateGame(id, (name ?? existing.name).trim(), link ?? existing.link, logoPath, clearLogo === 'true' || clearLogo === true)
+    await updateGame(id, (name ?? existing.name).trim(), link ?? existing.link, logoPath, clearLogo === 'true' || clearLogo === true)
     res.json({ success: true })
   }
   if (contentType.includes('multipart/form-data')) {
@@ -548,24 +555,23 @@ app.put('/api/admin/games/:id', verifyAdminToken, requireAdminPermission('games'
   }
   const id = parseInt(req.params.id, 10)
   if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid ID' })
-  const existing = getGameById(id)
+  const existing = await getGameById(id)
   if (!existing) return res.status(404).json({ error: 'Game not found' })
   const { name, link } = req.body || {}
-  updateGame(id, (name ?? existing.name).trim(), link ?? existing.link, existing.logo_path, false)
+  await updateGame(id, (name ?? existing.name).trim(), link ?? existing.link, existing.logo_path, false)
   res.json({ success: true })
 })
 
-app.delete('/api/admin/games/:id', verifyAdminToken, requireAdminPermission('games'), (req, res) => {
+app.delete('/api/admin/games/:id', verifyAdminToken, requireAdminPermission('games'), async (req, res) => {
   const id = parseInt(req.params.id, 10)
   if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid ID' })
-  const result = deleteGame(id)
+  const result = await deleteGame(id)
   if (result.changes === 0) return res.status(404).json({ error: 'Game not found' })
   res.json({ success: true })
 })
 
-app.get('/api/admin/messages', verifyAdminToken, requireAdminPermission('chat'), (req, res) => {
-  const messages = getAllMessages()
-  const baseUrl = process.env.API_BASE || `http://localhost:${PORT}`
+app.get('/api/admin/messages', verifyAdminToken, requireAdminPermission('chat'), async (req, res) => {
+  const messages = await getAllMessages()
   res.json(messages.map(m => ({
     id: m.id,
     userId: m.user_id,
@@ -573,18 +579,17 @@ app.get('/api/admin/messages', verifyAdminToken, requireAdminPermission('chat'),
     date: m.date,
     type: m.type || 'text',
     attachmentPath: m.attachment_path,
-    attachmentUrl: m.attachment_path ? `${baseUrl}/uploads/${m.attachment_path}` : null,
+    attachmentUrl: getFileUrl(m.attachment_path),
     userName: m.name,
     userEmail: m.email,
     senderType: m.sender_type || 'user',
   })))
 })
 
-app.get('/api/admin/conversation/:userId', verifyAdminToken, requireAdminPermission('chat'), (req, res) => {
+app.get('/api/admin/conversation/:userId', verifyAdminToken, requireAdminPermission('chat'), async (req, res) => {
   const userId = parseInt(req.params.userId, 10)
   if (!userId || isNaN(userId)) return res.status(400).json({ error: 'Invalid user ID' })
-  const messages = getMessagesForUser(userId)
-  const baseUrl = process.env.API_BASE || `http://localhost:${PORT}`
+  const messages = await getMessagesForUser(userId)
   res.json(messages.map(m => ({
     id: m.id,
     message: m.message,
@@ -592,22 +597,25 @@ app.get('/api/admin/conversation/:userId', verifyAdminToken, requireAdminPermiss
     type: m.type || 'text',
     senderType: m.sender_type || 'user',
     senderName: m.senderName,
-    attachmentUrl: m.attachment_path ? `${baseUrl}/uploads/${m.attachment_path}` : null,
+    attachmentUrl: getFileUrl(m.attachment_path),
     status: m.status || 'delivered',
   })))
 })
 
-app.get('/api/friends', verifyUserToken, (req, res) => {
-  const friends = getFriends(req.userId)
+app.get('/api/friends', verifyUserToken, async (req, res) => {
+  const friends = await getFriends(req.userId)
   res.json(friends)
 })
 
-app.get('/api/users/search', verifyUserToken, (req, res) => {
+app.get('/api/users/search', verifyUserToken, async (req, res) => {
   const q = req.query.q || ''
-  const users = searchUsers(q, req.userId)
-  const friendIds = new Set(getFriends(req.userId).map(f => f.id))
-  const requestSentIds = getPendingRequestIdsSent(req.userId)
-  const pendingReceived = getPendingRequestsReceived(req.userId)
+  const [users, friends, requestSentIds, pendingReceived] = await Promise.all([
+    searchUsers(q, req.userId),
+    getFriends(req.userId),
+    getPendingRequestIdsSent(req.userId),
+    getPendingRequestsReceived(req.userId),
+  ])
+  const friendIds = new Set(friends.map(f => f.id))
   const requestReceivedMap = new Map(pendingReceived.map(r => [r.requester_id, r.id]))
   res.json(users.map(u => ({
     ...u,
@@ -618,50 +626,49 @@ app.get('/api/users/search', verifyUserToken, (req, res) => {
   })))
 })
 
-app.post('/api/friends', verifyUserToken, (req, res) => {
+app.post('/api/friends', verifyUserToken, async (req, res) => {
   const friendId = parseInt(req.body?.friendId, 10)
   if (!friendId || isNaN(friendId)) return res.status(400).json({ error: 'Invalid friend ID' })
-  const friend = getSignupById(friendId)
+  const friend = await getSignupById(friendId)
   if (!friend || !friend.verified) return res.status(404).json({ error: 'User not found' })
-  if (areFriends(req.userId, friendId)) return res.status(400).json({ error: 'Already friends' })
-  const id = sendFriendRequest(req.userId, friendId)
+  if (await areFriends(req.userId, friendId)) return res.status(400).json({ error: 'Already friends' })
+  const id = await sendFriendRequest(req.userId, friendId)
   if (!id) return res.status(400).json({ error: 'Request already sent or could not send' })
   res.json({ success: true, message: 'Friend request sent' })
 })
 
-app.get('/api/friend-requests', verifyUserToken, (req, res) => {
-  const requests = getPendingRequestsReceived(req.userId)
+app.get('/api/friend-requests', verifyUserToken, async (req, res) => {
+  const requests = await getPendingRequestsReceived(req.userId)
   res.json(requests.map(r => ({ id: r.id, requesterId: r.requester_id, name: r.name, email: r.email, date: r.date })))
 })
 
-app.post('/api/friend-requests/:id/accept', verifyUserToken, (req, res) => {
+app.post('/api/friend-requests/:id/accept', verifyUserToken, async (req, res) => {
   const id = parseInt(req.params.id, 10)
   if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid request ID' })
-  if (!acceptFriendRequest(id, req.userId)) return res.status(400).json({ error: 'Could not accept request' })
+  if (!(await acceptFriendRequest(id, req.userId))) return res.status(400).json({ error: 'Could not accept request' })
   res.json({ success: true, message: 'Friend added' })
 })
 
-app.post('/api/friend-requests/:id/reject', verifyUserToken, (req, res) => {
+app.post('/api/friend-requests/:id/reject', verifyUserToken, async (req, res) => {
   const id = parseInt(req.params.id, 10)
   if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid request ID' })
-  if (!rejectFriendRequest(id, req.userId)) return res.status(400).json({ error: 'Could not reject request' })
+  if (!(await rejectFriendRequest(id, req.userId))) return res.status(400).json({ error: 'Could not reject request' })
   res.json({ success: true, message: 'Request rejected' })
 })
 
-app.delete('/api/friends/:friendId', verifyUserToken, (req, res) => {
+app.delete('/api/friends/:friendId', verifyUserToken, async (req, res) => {
   const friendId = parseInt(req.params.friendId, 10)
   if (!friendId || isNaN(friendId)) return res.status(400).json({ error: 'Invalid friend ID' })
-  if (!areFriends(req.userId, friendId)) return res.status(404).json({ error: 'Not friends' })
-  if (!removeFriend(req.userId, friendId)) return res.status(400).json({ error: 'Cannot remove this friend' })
+  if (!(await areFriends(req.userId, friendId))) return res.status(404).json({ error: 'Not friends' })
+  if (!(await removeFriend(req.userId, friendId))) return res.status(400).json({ error: 'Cannot remove this friend' })
   res.json({ success: true, message: 'Friend removed' })
 })
 
-app.get('/api/direct-messages/:friendId', verifyUserToken, (req, res) => {
+app.get('/api/direct-messages/:friendId', verifyUserToken, async (req, res) => {
   const friendId = parseInt(req.params.friendId, 10)
   if (!friendId || isNaN(friendId)) return res.status(400).json({ error: 'Invalid friend ID' })
-  if (!areFriends(req.userId, friendId)) return res.status(403).json({ error: 'Must be friends to chat' })
-  const baseUrl = process.env.API_BASE || `http://localhost:${PORT}`
-  const messages = getDirectMessages(req.userId, friendId)
+  if (!(await areFriends(req.userId, friendId))) return res.status(403).json({ error: 'Must be friends to chat' })
+  const messages = await getDirectMessages(req.userId, friendId)
   res.json(messages.map(m => ({
     id: m.id,
     senderId: m.sender_id,
@@ -669,30 +676,32 @@ app.get('/api/direct-messages/:friendId', verifyUserToken, (req, res) => {
     message: m.message,
     date: m.date,
     type: m.type || 'text',
-    attachmentUrl: m.attachment_path ? `${baseUrl}/uploads/${m.attachment_path}` : null,
+    attachmentUrl: getFileUrl(m.attachment_path),
     senderName: m.sender_name,
     isOwn: m.sender_id === req.userId,
     status: m.status || 'delivered',
   })))
 })
 
-app.post('/api/direct-messages/:friendId', verifyUserToken, (req, res, next) => {
+app.post('/api/direct-messages/:friendId', verifyUserToken, async (req, res, next) => {
   const friendId = parseInt(req.params.friendId, 10)
   if (!friendId || isNaN(friendId)) return res.status(400).json({ error: 'Invalid friend ID' })
-  if (!areFriends(req.userId, friendId)) return res.status(403).json({ error: 'Must be friends to chat' })
+  if (!(await areFriends(req.userId, friendId))) return res.status(403).json({ error: 'Must be friends to chat' })
   const contentType = req.headers['content-type'] || ''
   if (contentType.includes('multipart/form-data')) {
-    return upload.fields([{ name: 'image', maxCount: 1 }, { name: 'voice', maxCount: 1 }])(req, res, (err) => {
+    return upload.fields([{ name: 'image', maxCount: 1 }, { name: 'voice', maxCount: 1 }])(req, res, async (err) => {
       if (err) return res.status(400).json({ error: err.message || 'Upload failed' })
       const message = req.body?.message?.trim() || ''
       const imageFile = req.files?.image?.[0]
       const voiceFile = req.files?.voice?.[0]
       if (imageFile) {
-        addDirectMessage(req.userId, friendId, message || '📷 Image', 'image', imageFile.filename)
+        const storedPath = await processUploadedFile(imageFile, 'msg', 'messages')
+        await addDirectMessage(req.userId, friendId, message || '📷 Image', 'image', storedPath)
       } else if (voiceFile) {
-        addDirectMessage(req.userId, friendId, message || '🎤 Voice message', 'voice', voiceFile.filename)
+        const storedPath = await processUploadedFile(voiceFile, 'msg', 'messages')
+        await addDirectMessage(req.userId, friendId, message || '🎤 Voice message', 'voice', storedPath)
       } else if (message) {
-        addDirectMessage(req.userId, friendId, message, 'text')
+        await addDirectMessage(req.userId, friendId, message, 'text')
       } else {
         return res.status(400).json({ error: 'Message, image, or voice required' })
       }
@@ -701,12 +710,12 @@ app.post('/api/direct-messages/:friendId', verifyUserToken, (req, res, next) => 
   }
   const { message } = req.body || {}
   if (!message?.trim()) return res.status(400).json({ error: 'Message required' })
-  addDirectMessage(req.userId, friendId, message.trim(), 'text')
+  await addDirectMessage(req.userId, friendId, message.trim(), 'text')
   res.json({ success: true })
 })
 
-app.get('/api/admin/me', verifyAdminToken, (req, res) => {
-  const admin = getAdminById(req.adminId)
+app.get('/api/admin/me', verifyAdminToken, async (req, res) => {
+  const admin = await getAdminById(req.adminId)
   if (!admin) return res.status(404).json({ error: 'Admin not found' })
   const perms = admin.permissions ? JSON.parse(admin.permissions) : null
   res.json({
@@ -718,9 +727,8 @@ app.get('/api/admin/me', verifyAdminToken, (req, res) => {
   })
 })
 
-app.get('/api/admin/admins', verifyAdminToken, requireAdminPermission('admins'), (req, res) => {
-  const admins = getAllAdmins()
-  const friends = getAdminFriends(req.adminId)
+app.get('/api/admin/admins', verifyAdminToken, requireAdminPermission('admins'), async (req, res) => {
+  const [admins, friends] = await Promise.all([getAllAdmins(), getAdminFriends(req.adminId)])
   const friendIds = new Set(friends.map(f => f.id))
   res.json(admins.map(a => ({
     id: a.id,
@@ -733,7 +741,7 @@ app.get('/api/admin/admins', verifyAdminToken, requireAdminPermission('admins'),
   })))
 })
 
-app.post('/api/admin/admins', verifyAdminToken, requireAdminPermission('admins'), (req, res) => {
+app.post('/api/admin/admins', verifyAdminToken, requireAdminPermission('admins'), async (req, res) => {
   if (req.admin.role !== 'super') return res.status(403).json({ error: 'Only superior admin can create admins' })
   const { email, name, password, permissions } = req.body || {}
   if (!email?.trim() || !name?.trim() || !password) {
@@ -741,7 +749,7 @@ app.post('/api/admin/admins', verifyAdminToken, requireAdminPermission('admins')
   }
   if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' })
   if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email' })
-  if (getAdminByEmail(email.trim())) return res.status(400).json({ error: 'Email already registered' })
+  if (await getAdminByEmail(email.trim())) return res.status(400).json({ error: 'Email already registered' })
   const perms = typeof permissions === 'object' ? permissions : {
     users: true,
     chat: true,
@@ -750,7 +758,7 @@ app.post('/api/admin/admins', verifyAdminToken, requireAdminPermission('admins')
     admins: false,
     settings: false,
   }
-  const id = createAdmin({
+  const id = await createAdmin({
     email: email.trim().toLowerCase(),
     name: name.trim(),
     passwordHash: hashPassword(password),
@@ -761,40 +769,42 @@ app.post('/api/admin/admins', verifyAdminToken, requireAdminPermission('admins')
   res.json({ success: true, id, message: 'Admin created' })
 })
 
-app.get('/api/admin/friends', verifyAdminToken, requireAdminPermission('admins'), (req, res) => {
-  const friends = getAdminFriends(req.adminId)
+app.get('/api/admin/friends', verifyAdminToken, requireAdminPermission('admins'), async (req, res) => {
+  const friends = await getAdminFriends(req.adminId)
   res.json(friends)
 })
 
-app.post('/api/admin/friends', verifyAdminToken, requireAdminPermission('admins'), (req, res) => {
+app.post('/api/admin/friends', verifyAdminToken, requireAdminPermission('admins'), async (req, res) => {
   const friendAdminId = parseInt(req.body?.friendAdminId, 10)
   if (!friendAdminId || isNaN(friendAdminId)) return res.status(400).json({ error: 'Invalid admin ID' })
   if (friendAdminId === req.adminId) return res.status(400).json({ error: 'Cannot add yourself' })
-  const admin = getAdminById(friendAdminId)
+  const admin = await getAdminById(friendAdminId)
   if (!admin) return res.status(404).json({ error: 'Admin not found' })
-  if (areAdminFriends(req.adminId, friendAdminId)) return res.status(400).json({ error: 'Already friends' })
-  if (!addAdminFriend(req.adminId, friendAdminId)) return res.status(400).json({ error: 'Could not add friend' })
+  if (await areAdminFriends(req.adminId, friendAdminId)) return res.status(400).json({ error: 'Already friends' })
+  if (!(await addAdminFriend(req.adminId, friendAdminId))) return res.status(400).json({ error: 'Could not add friend' })
   res.json({ success: true, message: 'Friend added' })
 })
 
-app.post('/api/admin/reply', verifyAdminToken, requireAdminPermission('chat'), (req, res, next) => {
+app.post('/api/admin/reply', verifyAdminToken, requireAdminPermission('chat'), async (req, res, next) => {
   const contentType = req.headers['content-type'] || ''
   if (contentType.includes('multipart/form-data')) {
-    return upload.fields([{ name: 'image', maxCount: 1 }, { name: 'voice', maxCount: 1 }])(req, res, (err) => {
+    return upload.fields([{ name: 'image', maxCount: 1 }, { name: 'voice', maxCount: 1 }])(req, res, async (err) => {
       if (err) return res.status(400).json({ error: err.message || 'Upload failed' })
       const userId = parseInt(req.body?.userId, 10)
       if (!userId || isNaN(userId)) return res.status(400).json({ error: 'Invalid user ID' })
-      const user = getSignupById(userId)
+      const user = await getSignupById(userId)
       if (!user) return res.status(404).json({ error: 'User not found' })
       const message = req.body?.message?.trim() || ''
       const imageFile = req.files?.image?.[0]
       const voiceFile = req.files?.voice?.[0]
       if (imageFile) {
-        addMessage(userId, message || '📷 Image', 'image', imageFile.filename, 'support')
+        const storedPath = await processUploadedFile(imageFile, 'msg', 'messages')
+        await addMessage(userId, message || '📷 Image', 'image', storedPath, 'support')
       } else if (voiceFile) {
-        addMessage(userId, message || '🎤 Voice message', 'voice', voiceFile.filename, 'support')
+        const storedPath = await processUploadedFile(voiceFile, 'msg', 'messages')
+        await addMessage(userId, message || '🎤 Voice message', 'voice', storedPath, 'support')
       } else if (message) {
-        addMessage(userId, message, 'text', null, 'support')
+        await addMessage(userId, message, 'text', null, 'support')
       } else {
         return res.status(400).json({ error: 'Message, image, or voice required' })
       }
@@ -805,24 +815,24 @@ app.post('/api/admin/reply', verifyAdminToken, requireAdminPermission('chat'), (
   const id = parseInt(userId, 10)
   if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid user ID' })
   if (!message?.trim()) return res.status(400).json({ error: 'Message required' })
-  const user = getSignupById(id)
+  const user = await getSignupById(id)
   if (!user) return res.status(404).json({ error: 'User not found' })
-  addMessage(id, message.trim(), 'text', null, 'support')
+  await addMessage(id, message.trim(), 'text', null, 'support')
   res.json({ success: true, message: 'Reply sent' })
 })
 
-app.post('/api/user/login', (req, res) => {
+app.post('/api/user/login', async (req, res) => {
   const { email, password } = req.body || {}
   const emailLower = (email || '').trim().toLowerCase()
   if (!emailLower || !password) {
     return res.status(400).json({ error: 'Email and password required' })
   }
-  const user = getSignupByEmail(emailLower)
+  const user = await getSignupByEmail(emailLower)
   if (!user) return res.status(401).json({ error: 'Invalid email or password' })
   if (!verifyPassword(password, user.password_hash)) {
     return res.status(401).json({ error: 'Invalid email or password' })
   }
-  updateUserActive(user.id)
+  await updateUserActive(user.id)
   const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' })
   res.json({
     success: true,
@@ -837,8 +847,8 @@ app.post('/api/user/login', (req, res) => {
   })
 })
 
-app.get('/api/user/me', verifyUserToken, (req, res) => {
-  const user = getSignupById(req.userId)
+app.get('/api/user/me', verifyUserToken, async (req, res) => {
+  const user = await getSignupById(req.userId)
   if (!user) return res.status(404).json({ error: 'User not found' })
   res.json({
     id: user.id,
@@ -850,20 +860,22 @@ app.get('/api/user/me', verifyUserToken, (req, res) => {
   })
 })
 
-app.post('/api/messages', verifyUserToken, (req, res, next) => {
+app.post('/api/messages', verifyUserToken, async (req, res, next) => {
   const contentType = req.headers['content-type'] || ''
   if (contentType.includes('multipart/form-data')) {
-    return upload.fields([{ name: 'image', maxCount: 1 }, { name: 'voice', maxCount: 1 }])(req, res, (err) => {
+    return upload.fields([{ name: 'image', maxCount: 1 }, { name: 'voice', maxCount: 1 }])(req, res, async (err) => {
       if (err) return res.status(400).json({ error: err.message || 'Upload failed' })
       const message = req.body?.message?.trim() || ''
       const imageFile = req.files?.image?.[0]
       const voiceFile = req.files?.voice?.[0]
       if (imageFile) {
-        addMessage(req.userId, message || '📷 Image', 'image', imageFile.filename)
+        const storedPath = await processUploadedFile(imageFile, 'msg', 'messages')
+        await addMessage(req.userId, message || '📷 Image', 'image', storedPath)
       } else if (voiceFile) {
-        addMessage(req.userId, message || '🎤 Voice message', 'voice', voiceFile.filename)
+        const storedPath = await processUploadedFile(voiceFile, 'msg', 'messages')
+        await addMessage(req.userId, message || '🎤 Voice message', 'voice', storedPath)
       } else if (message) {
-        addMessage(req.userId, message, 'text')
+        await addMessage(req.userId, message, 'text')
       } else {
         return res.status(400).json({ error: 'Message, image, or voice required' })
       }
@@ -872,32 +884,31 @@ app.post('/api/messages', verifyUserToken, (req, res, next) => {
   }
   const { message } = req.body || {}
   if (!message?.trim()) return res.status(400).json({ error: 'Message required' })
-  addMessage(req.userId, message.trim(), 'text')
+  await addMessage(req.userId, message.trim(), 'text')
   res.json({ success: true, message: 'Message sent' })
 })
 
-app.get('/api/messages', verifyUserToken, (req, res) => {
-  let messages = getMessagesByUser(req.userId)
+app.get('/api/messages', verifyUserToken, async (req, res) => {
+  let messages = await getMessagesByUser(req.userId)
   if (messages.length === 0) {
-    addMessage(req.userId, 'Hello! Welcome to Winfinity. Which game would you like to play?', 'text', null, 'support')
-    messages = getMessagesByUser(req.userId)
+    await addMessage(req.userId, 'Hello! Welcome to Winfinity. Which game would you like to play?', 'text', null, 'support')
+    messages = await getMessagesByUser(req.userId)
   }
-  const baseUrl = process.env.API_BASE || `http://localhost:${PORT}`
   res.json(messages.map(m => ({
     id: m.id,
     message: m.message,
     date: m.date,
     type: m.type || 'text',
     attachmentPath: m.attachment_path,
-    attachmentUrl: m.attachment_path ? `${baseUrl}/uploads/${m.attachment_path}` : null,
+    attachmentUrl: getFileUrl(m.attachment_path),
     senderName: m.sender_type === 'support' ? 'Winfinity Support' : m.name,
     senderType: m.sender_type || 'user',
     status: m.status || 'delivered',
   })))
 })
 
-app.get('/api/feed', (req, res) => {
-  const posts = getFeedPosts()
+app.get('/api/feed', async (req, res) => {
+  const posts = await getFeedPosts()
   res.json(mapFeedPostsWithUrls(posts))
 })
 
@@ -907,7 +918,7 @@ app.get('/api/health', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Winfinity server running on http://localhost:${PORT}`)
-  console.log(`Database: backend/data/winfinity.db`)
+  console.log(`Database: ${process.env.DATABASE_URL ? 'PostgreSQL (Supabase)' : 'SQLite (backend/data/winfinity.db)'}`)
   if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
     console.log('Set GMAIL_USER and GMAIL_APP_PASSWORD to enable verification emails')
   }
